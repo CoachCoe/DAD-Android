@@ -30,8 +30,11 @@ jobs:
       - name: Test Compose journeys and Keystore on Android
         run: |
           export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/dad-avd"
+          mkdir -p "$ANDROID_AVD_HOME"
           sudo chmod a+rw /dev/kvm
-          printf 'no\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --name dad-foundation --package 'system-images;android-35;google_apis;x86_64' --device pixel_7
+          printf 'no\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --name dad-foundation --path "$ANDROID_AVD_HOME/dad-foundation.avd" --package 'system-images;android-35;google_apis;x86_64' --device pixel_7
+          "$ANDROID_HOME/emulator/emulator" -list-avds | grep -Fx dad-foundation
           "$ANDROID_HOME/emulator/emulator" -avd dad-foundation -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect > "$RUNNER_TEMP/emulator.log" 2>&1 &
           trap 'adb emu kill || true' EXIT
           if ! timeout 120 adb wait-for-device; then cat "$RUNNER_TEMP/emulator.log"; exit 1; fi
