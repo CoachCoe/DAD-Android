@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.core.net.toUri
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
@@ -138,6 +139,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         val unavailable = BuildConfig.DEBUG && intent.getBooleanExtra("preview_unavailable", false)
         val appContext = applicationContext
         incomingLink = intent.dataString

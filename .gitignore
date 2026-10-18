@@ -5,6 +5,7 @@
 node_modules/
 .build/
 .gradle/
+.kotlin/
 build/
 DerivedData/
 xcuserdata/
