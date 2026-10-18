@@ -186,7 +186,7 @@ class MainActivity : ComponentActivity() {
                             when (val state = model.state) {
                                 AccountState.Loading -> { CircularProgressIndicator(); Text("Loading your account…") }
                                 is AccountState.Ready -> {
-                                    Text("Welcome, ${state.profile.publicName}", style = MaterialTheme.typography.titleLarge)
+                                    Text("Welcome, ${state.profile.publicName ?: "friend"}", style = MaterialTheme.typography.titleLarge)
                                     Text("Your account has a home here.")
                                 }
                                 AccountState.Unavailable -> {
