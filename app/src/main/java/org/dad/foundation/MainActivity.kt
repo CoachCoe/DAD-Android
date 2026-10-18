@@ -129,9 +129,15 @@ class PreviewAccountModel(private val factory: (CoroutineScope, Boolean) -> Acco
     }
 }
 
+private fun tokenColor(name: String) = Color(DADTokens.color.getValue(name).toColorInt())
+
 class MainActivity : ComponentActivity() {
     private var incomingLink: String? = null
     private var linkEvent by mutableIntStateOf(0)
+    private val linkRouter by lazy {
+        if (BuildConfig.DAD_PUBLIC_ORIGIN.isBlank()) null
+        else runCatching { LinkRouter(BuildConfig.DAD_PUBLIC_ORIGIN, assets.open("links.json").bufferedReader().use { it.readText() }) }.getOrNull()
+    }
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         incomingLink = intent.dataString
@@ -155,9 +161,10 @@ class MainActivity : ComponentActivity() {
             val model: PreviewAccountModel = viewModel(factory = factory)
             LaunchedEffect(Unit) { model.load(unavailable) }
             LaunchedEffect(linkEvent) {
-                if (BuildConfig.DAD_PUBLIC_ORIGIN.isBlank()) return@LaunchedEffect
-                val router = try { LinkRouter(BuildConfig.DAD_PUBLIC_ORIGIN, assets.open("links.json").bufferedReader().use { it.readText() }) }
-                    catch (_: Exception) { model.configurationUnavailable(); return@LaunchedEffect }
+                val router = linkRouter ?: run {
+                    if (BuildConfig.DAD_PUBLIC_ORIGIN.isNotBlank()) model.configurationUnavailable()
+                    return@LaunchedEffect
+                }
                 incomingLink?.let { link ->
                     model.receive(link, router)?.let {
                         try { CustomTabsIntent.Builder().build().launchUrl(this@MainActivity, it.toUri()) }
@@ -165,9 +172,9 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
-            val primary = Color(DADTokens.color.getValue("brand-ink").toColorInt())
-            val colors = if (isSystemInDarkTheme()) darkColorScheme(primary = primary, background = Color(DADTokens.color.getValue("ink-deep").toColorInt()))
-                else lightColorScheme(primary = primary, background = Color(DADTokens.color.getValue("paper").toColorInt()))
+            val primary = tokenColor("brand-ink")
+            val colors = if (isSystemInDarkTheme()) darkColorScheme(primary = primary, background = tokenColor("ink-deep"))
+                else lightColorScheme(primary = primary, background = tokenColor("paper"))
             MaterialTheme(colorScheme = colors) {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.Center) {
