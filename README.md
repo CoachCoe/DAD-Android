@@ -6,7 +6,7 @@ the mobile PRD.
 
 ## Build and test
 
-Requires JDK 21, Node 24, Android SDK platform 37/build tools 36.0.0, and Android Studio
+Requires JDK 21, Node 24, Android SDK package `platforms;android-37.0`/build tools 36.0.0, and Android Studio
 with AGP 9.4 support. Set `ANDROID_HOME` to your SDK directory or use an ignored
 `local.properties` with `sdk.dir`. The checksum-pinned Gradle 9.8.1 wrapper downloads
 its own Gradle distribution.
