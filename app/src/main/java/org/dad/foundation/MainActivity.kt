@@ -1,0 +1,198 @@
+package org.dad.foundation
+
+import android.os.Bundle
+import android.content.Intent
+import androidx.core.net.toUri
+import androidx.browser.customtabs.CustomTabsIntent
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import androidx.core.graphics.toColorInt
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import org.dad.foundation.generated.DADTokens
+
+sealed interface AccountState {
+    data object Loading : AccountState
+    data class Ready(val profile: AccountProfile) : AccountState
+    data object Unavailable : AccountState
+    data object SignedOut : AccountState
+}
+
+private class PreviewStore : CredentialStore {
+    private var value: Credentials? = Credentials("preview", "preview-refresh", Long.MAX_VALUE)
+    override fun load() = value
+    override fun save(value: Credentials) { this.value = value }
+    override fun clear() { value = null }
+}
+private class PreviewAPI(private var failFirst: Boolean) : AccountAPI {
+    override suspend fun profile(access: String): AccountProfile {
+        delay(250)
+        if (failFirst) { failFirst = false; throw AccountFailure.Unavailable }
+        return AccountProfile("alex@example.org", "Alex")
+    }
+    override suspend fun refresh(token: String): Credentials = throw AccountFailure.SignedOut
+    override suspend fun claim(token: String): Credentials = throw AccountFailure.Unavailable
+    override suspend fun logout(access: String) = Unit
+}
+
+class PreviewAccountModel(private val factory: (CoroutineScope, Boolean) -> AccountSession) : ViewModel() {
+    var state: AccountState by mutableStateOf(AccountState.Loading)
+        private set
+    private var session: AccountSession? = null
+    private var loading = false
+    private var pendingProof: String? = null
+    private var completedProof: String? = null
+    private var activeProof: String? = null
+    private val gate = NavigationGate()
+    fun load(unavailableFirst: Boolean = false, claim: String? = null) {
+        if (loading) { if (claim != null) pendingProof = claim; return }
+        loading = true
+        state = AccountState.Loading
+        viewModelScope.launch {
+            var claimed = false
+            try {
+                val profile = withContext(Dispatchers.IO) {
+                    val active = session ?: factory(CoroutineScope(viewModelScope.coroutineContext + Dispatchers.IO), unavailableFirst).also { session = it }
+                    if (claim != null) { active.claim(claim); claimed = true }
+                    active.profile()
+                }
+                state = AccountState.Ready(profile)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: AccountFailure.SignedOut) { state = AccountState.SignedOut }
+            catch (_: Exception) { state = AccountState.Unavailable }
+            finally {
+                loading = false
+                if (claim != null) {
+                    if (claimed) { completedProof = activeProof; gate.signedIn() }
+                    activeProof = null
+                }
+                pendingProof?.let { pendingProof = null; load(claim = it) }
+            }
+        }
+    }
+    fun configurationUnavailable() { state = AccountState.Unavailable }
+    fun receive(value: String, router: LinkRouter): String? {
+        return when (val intent = router.route(value)) {
+            is LinkIntent.Account -> if (intent.destination == AccountDestination.PROFILE) {
+                gate.receive(intent.destination, state is AccountState.Ready)
+                load(); null
+            } else value
+            is LinkIntent.Claim -> {
+                if (intent.next != null || BuildConfig.DAD_API_ORIGIN.isBlank()) value
+                else {
+                    val digest = java.security.MessageDigest.getInstance("SHA-256").digest(intent.token.toByteArray()).joinToString("") { "%02x".format(it) }
+                    if (activeProof == null && completedProof != digest) { activeProof = digest; load(claim = intent.token) }
+                    null
+                }
+            }
+            is LinkIntent.EmailChange, is LinkIntent.Web -> value
+            null -> null
+        }
+    }
+}
+
+class MainActivity : ComponentActivity() {
+    private var incomingLink: String? = null
+    private var linkEvent by mutableIntStateOf(0)
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        incomingLink = intent.dataString
+        linkEvent++
+    }
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val unavailable = BuildConfig.DEBUG && intent.getBooleanExtra("preview_unavailable", false)
+        val appContext = applicationContext
+        incomingLink = intent.dataString
+        val factory = viewModelFactory {
+            initializer {
+                PreviewAccountModel { scope, failFirst ->
+                    if (BuildConfig.DAD_API_ORIGIN.isBlank()) AccountSession(PreviewAPI(failFirst), PreviewStore(), scope)
+                    else AccountSession(WireAPI(BuildConfig.DAD_API_ORIGIN), KeystoreCredentialStore(appContext), scope)
+                }
+            }
+        }
+        setContent {
+            val model: PreviewAccountModel = viewModel(factory = factory)
+            LaunchedEffect(Unit) { model.load(unavailable) }
+            LaunchedEffect(linkEvent) {
+                if (BuildConfig.DAD_PUBLIC_ORIGIN.isBlank()) return@LaunchedEffect
+                val router = try { LinkRouter(BuildConfig.DAD_PUBLIC_ORIGIN, assets.open("links.json").bufferedReader().use { it.readText() }) }
+                    catch (_: Exception) { model.configurationUnavailable(); return@LaunchedEffect }
+                incomingLink?.let { link ->
+                    model.receive(link, router)?.let {
+                        try { CustomTabsIntent.Builder().build().launchUrl(this@MainActivity, it.toUri()) }
+                        catch (_: android.content.ActivityNotFoundException) { model.configurationUnavailable() }
+                    }
+                }
+            }
+            val primary = Color(DADTokens.color.getValue("brand-ink").toColorInt())
+            val colors = if (isSystemInDarkTheme()) darkColorScheme(primary = primary, background = Color(DADTokens.color.getValue("ink-deep").toColorInt()))
+                else lightColorScheme(primary = primary, background = Color(DADTokens.color.getValue("paper").toColorInt()))
+            MaterialTheme(colorScheme = colors) {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    Column(modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.Center) {
+                        Text("DAD", style = MaterialTheme.typography.displayMedium)
+                        Spacer(Modifier.height(16.dp))
+                        Text("Good things start together.", style = MaterialTheme.typography.headlineMedium)
+                        Spacer(Modifier.height(28.dp))
+                        Column(Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
+                            when (val state = model.state) {
+                                AccountState.Loading -> { CircularProgressIndicator(); Text("Loading your account…") }
+                                is AccountState.Ready -> {
+                                    Text("Welcome, ${state.profile.publicName}", style = MaterialTheme.typography.titleLarge)
+                                    Text("Your account has a home here.")
+                                }
+                                AccountState.Unavailable -> {
+                                    Text("Your account is unavailable right now.", style = MaterialTheme.typography.titleLarge)
+                                    Text("Please try again in a moment.")
+                                    Button(onClick = { model.load() }) { Text("Try again") }
+                                }
+                                AccountState.SignedOut -> Text("You’re signed out. Use your DAD sign-in link to continue.")
+                            }
+                        }
+                        Spacer(Modifier.height(28.dp))
+                        if (BuildConfig.DAD_API_ORIGIN.isBlank()) Text("Preview · Sample account", style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+            }
+        }
+    }
+}
