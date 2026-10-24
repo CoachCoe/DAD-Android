@@ -4,7 +4,7 @@ permissions:
   contents: read
 jobs:
   contract:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, dad, linux]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
@@ -13,6 +13,10 @@ jobs:
       - run: node scripts/check-foundation.mjs
       - run: node --test scripts/check-foundation.test.mjs
   android:
+    # Stays GitHub-hosted: boots an x86_64 emulator that needs Linux KVM
+    # (`/dev/kvm`), which the self-hosted Apple Silicon Mac cannot provide
+    # (no KVM, and the x86_64 system image will not run under HVF). Move this
+    # to a self-hosted Linux host with KVM to go fully self-hosted.
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
