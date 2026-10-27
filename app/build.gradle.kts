@@ -21,6 +21,9 @@ android {
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     sourceSets["main"].assets.directories.add(layout.buildDirectory.dir("generated/assets").get().asFile.path)
     sourceSets["test"].resources.directories.add(layout.buildDirectory.dir("generated/assets").get().asFile.path)
+    if (providers.gradleProperty("dadIntegrationFixture").isPresent) {
+        sourceSets["test"].kotlin.directories.add("src/integrationTest/kotlin")
+    }
     sourceSets.named("main") {
         kotlin.directories.add(layout.buildDirectory.dir("generated/openapi/src/main/kotlin").get().asFile.path)
         kotlin.directories.add(layout.buildDirectory.dir("generated/tokens").get().asFile.path)
@@ -63,6 +66,12 @@ val generateLinks = tasks.register<Copy>("generateLinks") {
 }
 tasks.named("preBuild") { dependsOn(generateClient, generateTokens, generateLinks) }
 
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    providers.gradleProperty("dadIntegrationFixture").orNull?.let {
+        systemProperty("dad.integration.fixture", it)
+    }
+}
+
 dependencies {
     add("codegenDependencies", "org.openapitools:openapi-generator-cli:7.20.0") { isTransitive = false }
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
@@ -75,8 +84,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("com.squareup.retrofit2:retrofit:3.0.0")
     implementation("com.squareup.retrofit2:converter-gson:3.0.0")
-    implementation("com.squareup.okhttp3:okhttp:5.5.0")
-    implementation("com.google.code.gson:gson:2.14.0")
+    implementation("com.squareup.okhttp3:okhttp:5.5.1")
+    implementation("com.google.code.gson:gson:2.15.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")

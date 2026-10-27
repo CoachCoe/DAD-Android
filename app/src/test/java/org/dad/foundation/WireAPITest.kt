@@ -18,7 +18,7 @@ class WireAPITest {
             assertNull(request.header("Origin"))
             assertNull(request.header("Cookie"))
             Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK")
-                .body("""{"email":"donor@example.org","public_name":null,"referral_emails":true,"marketing_emails":false,"push_referral_converted":true,"push_streak_at_risk":true,"push_streak_milestone":true,"version":1,"consent_version":"synthetic"}""".toResponseBody("application/json".toMediaType())).build()
+                .body("""{"email":"donor@example.org","public_name":null,"account_role":"DONOR","zip":null,"city":null,"timezone":null,"phone":null,"referral_emails":true,"marketing_emails":false,"push_referral_converted":true,"push_streak_at_risk":true,"push_streak_milestone":true,"push_streak_lapsed":true,"push_badge_earned":true,"push_gift_processed":true,"push_event_nearby":true,"push_event_reminder":true,"push_event_promoted":true,"rankings_opted_out":false,"network_visible":false,"volunteer":false,"volunteer_interests":[],"version":3,"consent_version":"synthetic-v1"}""".toResponseBody("application/json".toMediaType())).build()
         }.build()
         assertEquals(AccountProfile("donor@example.org", null), WireAPI("https://api.test", http).profile("synthetic-access"))
     }

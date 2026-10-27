@@ -8,7 +8,7 @@ the mobile PRD.
 
 Requires JDK 21, Node 24, Android SDK package `platforms;android-37.0`/build tools 36.0.0, and Android Studio
 with AGP 9.4 support. Set `ANDROID_HOME` to your SDK directory or use an ignored
-`local.properties` with `sdk.dir`. The checksum-pinned Gradle 9.8.1 wrapper downloads
+`local.properties` with `sdk.dir`. The checksum-pinned Gradle 9.8.2 wrapper downloads
 its own Gradle distribution.
 
 ```sh
@@ -25,7 +25,7 @@ configuration deprecation diagnostics; those upstream warnings are not suppresse
 
 ## Contract, sessions, and transport
 
-`foundation.lock.json` pins mobile foundation 1.0.0 and its manifest SHA-256.
+`foundation.lock.json` pins mobile foundation 2.0.0 and its manifest SHA-256.
 The vendored release is verified before code generation. The build invokes pinned
 OpenAPI Generator CLI 7.20.0 and generates Retrofit coroutine interfaces and Gson models
 for profile, claim, refresh, and logout. No client is generated from a moving branch.
@@ -72,3 +72,14 @@ Download a specific `mobile-foundation-vX.Y.Z` release from `CoachCoe/DAD-Main`,
 its source revision and changes, and update the vendored snapshot and lock together.
 `node scripts/check-foundation.mjs` verifies the version, revision, manifest, and payload
 hashes offline. Never edit the generated snapshot or fetch latest/dev during builds.
+
+## Real backend acceptance
+
+From the matching DAD-Main checkout, run `make test-native-clients` with
+`TEST_DATABASE_URL` naming its migrated synthetic `donor_go` database. Override
+`DAD_IOS_DIR` and `DAD_ANDROID_DIR` when the checkouts are elsewhere. This opt-in
+suite exercises the actual generated client and session store against a loopback
+HTTPS Go API: claim/profile, expired-access refresh and credential replacement,
+revocation cleanup, and logout. Test-only transports trust the temporary server's
+certificate; production TLS settings are unchanged. No provider credentials are used.
+The test runner removes the private proof fixtures after either success or failure.
