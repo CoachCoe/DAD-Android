@@ -28,7 +28,15 @@ android {
         kotlin.directories.add(layout.buildDirectory.dir("generated/openapi/src/main/kotlin").get().asFile.path)
         kotlin.directories.add(layout.buildDirectory.dir("generated/tokens").get().asFile.path)
     }
-    lint { abortOnError = true; warningsAsErrors = true }
+    lint {
+        abortOnError = true
+        warningsAsErrors = true
+        // These advisories flag that a newer upstream release exists, not a code
+        // defect, so with warningsAsErrors they break CI whenever any dependency
+        // (or Gradle) ships a new version. Disable them; real lint warnings still
+        // fail the build.
+        disable += setOf("NewerVersionAvailable", "AndroidGradlePluginVersion")
+    }
 }
 
 val prepareContract = tasks.register<Exec>("prepareContract") {
