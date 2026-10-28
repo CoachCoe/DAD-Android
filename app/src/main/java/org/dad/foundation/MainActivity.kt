@@ -30,11 +30,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -160,6 +162,7 @@ class MainActivity : ComponentActivity() {
         val unavailable = BuildConfig.DEBUG && intent.getBooleanExtra("preview_unavailable", false)
         val giving = BuildConfig.DEBUG && intent.getBooleanExtra("preview_giving", false)
         val impact = BuildConfig.DEBUG && intent.getBooleanExtra("preview_impact", false)
+        val network = BuildConfig.DEBUG && intent.getBooleanExtra("preview_network", false)
         val appContext = applicationContext
         incomingLink = intent.dataString
         val factory = viewModelFactory {
@@ -210,6 +213,8 @@ class MainActivity : ComponentActivity() {
                                 GiftScreen(viewModel(factory = GivingModel.previewFactory()))
                             } else if (impact) {
                                 ImpactHome(viewModel(factory = EngagementModel.previewFactory()))
+                            } else if (network) {
+                                NetworkBadgesHome(viewModel(factory = NetworkBadgesModel.previewFactory()))
                             } else {
                                 DonorLanding(model)
                             }
@@ -416,5 +421,104 @@ private fun ImpactContent(model: EngagementModel, snapshot: EngagementSnapshot) 
         snapshot.spend.categories.forEach { category ->
             Text("${category.category}: ${category.amountLabel}", style = MaterialTheme.typography.bodySmall)
         }
+    }
+}
+
+
+// Network page + 24-badge grid (PRD N-1..N-3, B-1..B-4). Badge state is conveyed in TEXT (the
+// earned/locked a11y label + rule/perk detail line), never by colour alone, and anonymous
+// referrals are shown only as a count — never named.
+@Composable
+private fun NetworkBadgesHome(model: NetworkBadgesModel) {
+    LaunchedEffect(Unit) { model.load() }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .safeDrawingPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp)
+            .testTag("network-home"),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text("Your network & badges", style = MaterialTheme.typography.headlineMedium)
+        when (val phase = model.phase) {
+            is NetworkBadgesPhase.Loading ->
+                CircularProgressIndicator(modifier = Modifier.testTag("network-loading"))
+            is NetworkBadgesPhase.Failed ->
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(phase.message, modifier = Modifier.testTag("network-error"))
+                    DadPrimaryButton("Try again") { model.load() }
+                }
+            is NetworkBadgesPhase.Ready -> model.snapshot?.let { NetworkBadgesContent(model, it) }
+        }
+    }
+}
+
+@Composable
+private fun NetworkBadgesContent(model: NetworkBadgesModel, snapshot: NetworkBadgesSnapshot) {
+    // Network summary (N-1/N-2): active count + combined annualized + next milestone.
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("Your network", style = MaterialTheme.typography.titleMedium)
+        Text(snapshot.network.activeLabel, style = MaterialTheme.typography.displaySmall, modifier = Modifier.testTag("network-active"))
+        Text(snapshot.network.annualizedLabel, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("network-annualized"))
+        snapshot.network.nextMilestone?.let {
+            Text(it.progressLabel, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("network-milestone"))
+        }
+    }
+
+    // Named invitees (N-3), then the anonymous count — anonymous referrals are counted, never named.
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        snapshot.network.namedInvitees.forEach { invitee ->
+            val suffix = if (invitee.active) "giving" else "paused"
+            Text("${invitee.name} — $suffix", style = MaterialTheme.typography.bodySmall)
+        }
+        snapshot.network.anonymousLabel?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("network-anonymous"))
+        }
+    }
+
+    // Sharing visibility (opt-in): off = anonymous, no links; choosing a public name mints links.
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Visibility", style = MaterialTheme.typography.titleMedium)
+        val sharing = snapshot.sharing
+        Text(sharing.visibilityLabel, modifier = Modifier.testTag("sharing-visibility"))
+        if (sharing.isPublic) {
+            sharing.shareLink?.let { Text("Share: $it", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("sharing-link")) }
+            sharing.inPersonLink?.let { Text("In person: $it", style = MaterialTheme.typography.bodySmall) }
+        } else {
+            // A real screen takes a typed name; the preview mints one so the opt-in flow is testable.
+            Button(onClick = { model.choosePublicName("Alex C.") }, modifier = Modifier.testTag("sharing-optin")) {
+                Text("Show my name & get a referral link")
+            }
+        }
+    }
+
+    // 24-badge grid (B-1..B-4): earned-in-colour / greyed-with-rule, state in TEXT for a11y.
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Badges", style = MaterialTheme.typography.titleMedium)
+        Text(snapshot.grid.summaryLabel, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("badge-summary"))
+        snapshot.grid.badges.chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { badge -> BadgeTile(badge) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BadgeTile(badge: Badge) {
+    // Earned badges render in the brand colour; locked badges greyed. State is ALSO in the a11y
+    // label + the detail line text (never colour alone) — a colour-blind or screen-reader user
+    // gets earned/locked from text (B-1, WCAG).
+    val color = if (badge.earned) tokenColor("brand-ink") else Color("#9AA0A6".toColorInt())
+    Column(
+        modifier = Modifier
+            .testTag(if (badge.earned) "badge-earned-${badge.code}" else "badge-locked-${badge.code}")
+            .semantics { contentDescription = badge.accessibilityLabel },
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(badge.title, style = MaterialTheme.typography.labelLarge, color = color)
+        Text(if (badge.earned) "Earned" else "Locked", style = MaterialTheme.typography.labelSmall, color = color)
+        Text(badge.detailLine, style = MaterialTheme.typography.bodySmall)
     }
 }
