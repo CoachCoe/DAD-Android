@@ -24,6 +24,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -77,6 +78,14 @@ class PreviewAccountModel(private val factory: (CoroutineScope, Boolean) -> Acco
     var state: AccountState by mutableStateOf(AccountState.Loading)
         private set
     private var session: AccountSession? = null
+    /**
+     * Whether a session object has been (or will be) created. In preview and the real app a
+     * session always exists, so a transient Unavailable/SignedOut is a sub-state of the donor
+     * shell (recoverable via "Try again"), NOT a reason to leave for the role-select splash.
+     * Only a config failure (blank public origin with no API) leaves this false.
+     */
+    var hasSession: Boolean by mutableStateOf(true)
+        private set
     private var loading = false
     private var pendingProof: String? = null
     private var completedProof: String? = null
@@ -108,7 +117,7 @@ class PreviewAccountModel(private val factory: (CoroutineScope, Boolean) -> Acco
             }
         }
     }
-    fun configurationUnavailable() { state = AccountState.Unavailable }
+    fun configurationUnavailable() { hasSession = false; state = AccountState.Unavailable }
     fun receive(value: String, router: LinkRouter): String? {
         return when (val intent = router.route(value)) {
             is LinkIntent.Account -> if (intent.destination == AccountDestination.PROFILE) {
@@ -177,31 +186,83 @@ class MainActivity : ComponentActivity() {
                 else lightColorScheme(primary = primary, background = tokenColor("paper"))
             MaterialTheme(colorScheme = colors) {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    Column(modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.Center) {
-                        Text("DAD", style = MaterialTheme.typography.displayMedium)
-                        Spacer(Modifier.height(16.dp))
-                        Text("Good things start together.", style = MaterialTheme.typography.headlineMedium)
-                        Spacer(Modifier.height(28.dp))
-                        Column(Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
-                            when (val state = model.state) {
-                                AccountState.Loading -> { CircularProgressIndicator(); Text("Loading your account…") }
-                                is AccountState.Ready -> {
-                                    Text("Welcome, ${state.profile.publicName ?: "friend"}", style = MaterialTheme.typography.titleLarge)
-                                    Text("Your account has a home here.")
-                                }
-                                AccountState.Unavailable -> {
-                                    Text("Your account is unavailable right now.", style = MaterialTheme.typography.titleLarge)
-                                    Text("Please try again in a moment.")
-                                    Button(onClick = { model.load() }) { Text("Try again") }
-                                }
-                                AccountState.SignedOut -> Text("You’re signed out. Use your DAD sign-in link to continue.")
+                    val router = androidx.compose.runtime.remember { RoleRouter() }
+                    var root by androidx.compose.runtime.remember { mutableStateOf<RoleRouter.Root>(router.root) }
+                    // A session-backed shell is the donor journey — the donor landing owns every
+                    // account sub-state (loading / ready / unavailable / signed-out) and its own
+                    // recovery, so stay on it. Only a genuinely session-less app goes to role-select.
+                    LaunchedEffect(model.hasSession) {
+                        if (model.hasSession) router.signedIn(AppRole.DONOR) else router.restoredSignedOut()
+                        root = router.root
+                    }
+                    when (val current = root) {
+                        is RoleRouter.Root.Restoring, is RoleRouter.Root.Authenticated ->
+                            if (current is RoleRouter.Root.Authenticated && current.role == AppRole.PARTNER) {
+                                PartnerLanding()
+                            } else {
+                                DonorLanding(model)
                             }
+                        is RoleRouter.Root.Unauthenticated -> RoleSelect { role ->
+                            router.selectRole(role); router.signedIn(role); root = router.root
                         }
-                        Spacer(Modifier.height(28.dp))
-                        if (BuildConfig.DAD_API_ORIGIN.isBlank()) Text("Preview · Sample account", style = MaterialTheme.typography.labelLarge)
                     }
                 }
             }
         }
+    }
+}
+
+/** The signed-in donor landing. Carries the exact copy the app has shown since the preview
+ * shell, so the role-aware root is a structural change, not a visible one. */
+@Composable
+private fun DonorLanding(model: PreviewAccountModel) {
+    Column(modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.Center) {
+        Text("DAD", style = MaterialTheme.typography.displayMedium)
+        Spacer(Modifier.height(16.dp))
+        Text("Good things start together.", style = MaterialTheme.typography.headlineMedium)
+        Spacer(Modifier.height(28.dp))
+        Column(Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
+            when (val state = model.state) {
+                AccountState.Loading -> { CircularProgressIndicator(); Text("Loading your account…") }
+                is AccountState.Ready -> {
+                    Text("Welcome, ${state.profile.publicName ?: "friend"}", style = MaterialTheme.typography.titleLarge)
+                    Text("Your account has a home here.")
+                }
+                AccountState.Unavailable -> {
+                    Text("Your account is unavailable right now.", style = MaterialTheme.typography.titleLarge)
+                    Text("Please try again in a moment.")
+                    Button(onClick = { model.load() }) { Text("Try again") }
+                }
+                AccountState.SignedOut -> Text("You’re signed out. Use your DAD sign-in link to continue.")
+            }
+        }
+        Spacer(Modifier.height(28.dp))
+        if (BuildConfig.DAD_API_ORIGIN.isBlank()) Text("Preview · Sample account", style = MaterialTheme.typography.labelLarge)
+    }
+}
+
+/** Minimal partner stack placeholder — fleshed out in Phase 8. Present now so the role-aware
+ * root compiles and routes both journeys. */
+@Composable
+private fun PartnerLanding() {
+    Column(modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.Center) {
+        Text("Partner portal", style = MaterialTheme.typography.displayMedium)
+        Spacer(Modifier.height(16.dp))
+        Text("Your organization’s giving home.", style = MaterialTheme.typography.headlineMedium)
+    }
+}
+
+/** Unauthenticated splash — pick a journey before signing in. The preview store starts
+ * signed-in, so this path is exercised only when there is genuinely no session. */
+@Composable
+private fun RoleSelect(onSelect: (AppRole) -> Unit) {
+    Column(modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.Center) {
+        Text("DAD", style = MaterialTheme.typography.displayMedium)
+        Spacer(Modifier.height(16.dp))
+        Text("Good things start together.", style = MaterialTheme.typography.headlineMedium)
+        Spacer(Modifier.height(28.dp))
+        DadPrimaryButton("I’m a donor") { onSelect(AppRole.DONOR) }
+        Spacer(Modifier.height(12.dp))
+        DadPrimaryButton("I’m a partner") { onSelect(AppRole.PARTNER) }
     }
 }
