@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -33,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -156,6 +158,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val unavailable = BuildConfig.DEBUG && intent.getBooleanExtra("preview_unavailable", false)
+        val giving = BuildConfig.DEBUG && intent.getBooleanExtra("preview_giving", false)
         val appContext = applicationContext
         incomingLink = intent.dataString
         val factory = viewModelFactory {
@@ -199,6 +202,11 @@ class MainActivity : ComponentActivity() {
                         is RoleRouter.Root.Restoring, is RoleRouter.Root.Authenticated ->
                             if (current is RoleRouter.Root.Authenticated && current.role == AppRole.PARTNER) {
                                 PartnerLanding()
+                            } else if (giving) {
+                                // Giving preview exercises the signed-in GiftScreen directly. The
+                                // donor shell reaches Restoring/Authenticated immediately (hasSession
+                                // starts true), so there is no load-delay gap to short-circuit.
+                                GiftScreen(viewModel(factory = GivingModel.previewFactory()))
                             } else {
                                 DonorLanding(model)
                             }
@@ -264,5 +272,65 @@ private fun RoleSelect(onSelect: (AppRole) -> Unit) {
         DadPrimaryButton("I’m a donor") { onSelect(AppRole.DONOR) }
         Spacer(Modifier.height(12.dp))
         DadPrimaryButton("I’m a partner") { onSelect(AppRole.PARTNER) }
+    }
+}
+
+/**
+ * Set-your-gift screen (G-1/G-2/G-7/G-8/G-9). Whole-dollar stepper $1…$30/day with the
+ * monthly ×30 echo and the streak bar; the cancel confirmation is rendered INLINE (never an
+ * OS dialog/bottom sheet) so it is deterministic in UI automation — the lesson the iOS side
+ * learned across three CI rounds.
+ */
+@Composable
+private fun GiftScreen(model: GivingModel) {
+    LaunchedEffect(Unit) { model.load() }
+    var confirmingCancel by androidx.compose.runtime.remember { mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .safeDrawingPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp)
+            .testTag("gift-screen"),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text("Set your gift", style = MaterialTheme.typography.headlineMedium)
+        Text(
+            model.selection.dailyLabel,
+            style = MaterialTheme.typography.displaySmall,
+            modifier = Modifier.testTag("gift-daily"),
+        )
+        Text(
+            "${model.selection.monthlyLabel} · charged monthly",
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Button(onClick = { model.decrement() }, modifier = Modifier.testTag("gift-decrease")) { Text("Decrease gift") }
+            Button(onClick = { model.increment() }, modifier = Modifier.testTag("gift-increase")) { Text("Increase gift") }
+        }
+        DadStreakBar(filled = model.selection.dailyDollars.coerceAtMost(30))
+        DadPrimaryButton("Save gift") { model.applySelection() }
+
+        if (model.recurring is RecurringState.Active) {
+            if (confirmingCancel) {
+                val periodEnd = (model.recurring as RecurringState.Active).periodEnd
+                Column(
+                    modifier = Modifier.testTag("cancel-confirm"),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("Cancel your gift?", style = MaterialTheme.typography.titleMedium)
+                    Text(CancelCopy.confirmation(periodEnd))
+                    Button(onClick = { model.cancel(); confirmingCancel = false }) { Text("End my gift") }
+                    Button(onClick = { confirmingCancel = false }) { Text("Keep giving") }
+                }
+            } else {
+                Button(onClick = { confirmingCancel = true }, modifier = Modifier.testTag("gift-cancel")) { Text("Cancel gift") }
+            }
+        }
+
+        when (val phase = model.phase) {
+            is GivingPhase.Failed -> Text(phase.message, modifier = Modifier.testTag("gift-error"))
+            else -> {}
+        }
     }
 }
