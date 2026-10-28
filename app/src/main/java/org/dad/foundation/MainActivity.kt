@@ -159,6 +159,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         val unavailable = BuildConfig.DEBUG && intent.getBooleanExtra("preview_unavailable", false)
         val giving = BuildConfig.DEBUG && intent.getBooleanExtra("preview_giving", false)
+        val impact = BuildConfig.DEBUG && intent.getBooleanExtra("preview_impact", false)
         val appContext = applicationContext
         incomingLink = intent.dataString
         val factory = viewModelFactory {
@@ -207,6 +208,8 @@ class MainActivity : ComponentActivity() {
                                 // donor shell reaches Restoring/Authenticated immediately (hasSession
                                 // starts true), so there is no load-delay gap to short-circuit.
                                 GiftScreen(viewModel(factory = GivingModel.previewFactory()))
+                            } else if (impact) {
+                                ImpactHome(viewModel(factory = EngagementModel.previewFactory()))
                             } else {
                                 DonorLanding(model)
                             }
@@ -331,6 +334,87 @@ private fun GiftScreen(model: GivingModel) {
         when (val phase = model.phase) {
             is GivingPhase.Failed -> Text(phase.message, modifier = Modifier.testTag("gift-error"))
             else -> {}
+        }
+    }
+}
+
+/**
+ * Phase 4 impact home (A-*, S-*, I-*, K-*): today's initiative rotation card, lifetime impact
+ * totals, the 30-day streak bar + milestone progress, the rankings card with an INLINE opt-out
+ * toggle (no dialog, per the Phase 3 UITest lesson), and the spend-by-category totals.
+ */
+@Composable
+private fun ImpactHome(model: EngagementModel) {
+    LaunchedEffect(Unit) { model.load() }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .safeDrawingPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp)
+            .testTag("impact-home"),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text("Your impact", style = MaterialTheme.typography.headlineMedium)
+        when (val phase = model.phase) {
+            is EngagementPhase.Loading ->
+                CircularProgressIndicator(modifier = Modifier.testTag("impact-loading"))
+            is EngagementPhase.Failed ->
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(phase.message, modifier = Modifier.testTag("impact-error"))
+                    DadPrimaryButton("Try again") { model.load() }
+                }
+            is EngagementPhase.Ready -> model.snapshot?.let { ImpactContent(model, it) }
+        }
+    }
+}
+
+@Composable
+private fun ImpactContent(model: EngagementModel, snapshot: EngagementSnapshot) {
+    // Today's initiative rotation card (A-1/A-2).
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(snapshot.today.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("today-title"))
+        Text(snapshot.today.summary, style = MaterialTheme.typography.bodyMedium)
+        snapshot.today.headlineMetrics.forEach { metric ->
+            Text("${metric.label}: ${metric.value}", style = MaterialTheme.typography.bodySmall)
+        }
+    }
+
+    // Lifetime impact total — "--" when unknown, never $0.
+    Text("Lifetime given", style = MaterialTheme.typography.labelMedium)
+    Text(snapshot.impact.givenLabel, style = MaterialTheme.typography.displaySmall, modifier = Modifier.testTag("impact-given"))
+
+    // Streak (S-1/S-2/S-3): count, 30-day bar (color + shape), milestone progress.
+    snapshot.streak?.let { streak ->
+        Text(streak.countLabel, style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("streak-count"))
+        DadStreakBar(filled = streak.barFilled)
+        Text(streak.progressLabel, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("streak-progress"))
+        if (streak.atRisk) {
+            Text("Give today to keep your streak.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("streak-atrisk"))
+        }
+    }
+
+    // Rankings (K-2): opt-out hides the position entirely — inline toggle, never a name list.
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Rankings", style = MaterialTheme.typography.titleMedium)
+        if (snapshot.ranking.isOptedOut) {
+            Text("You're not shown in rankings.", modifier = Modifier.testTag("ranking-optedout"))
+            Button(onClick = { model.setRankingOptIn(true) }, modifier = Modifier.testTag("ranking-optin")) { Text("Show my ranking") }
+        } else {
+            snapshot.ranking.nationalLabel?.let {
+                Text(it, modifier = Modifier.testTag("ranking-national"))
+            }
+            snapshot.ranking.cityLabel?.let { Text(it, modifier = Modifier.testTag("ranking-city")) }
+            Button(onClick = { model.setRankingOptIn(false) }, modifier = Modifier.testTag("ranking-optout")) { Text("Hide my ranking") }
+        }
+    }
+
+    // Spend-by-category totals (A-3) — totals only, never a line-item ledger.
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("Where it went", style = MaterialTheme.typography.titleMedium)
+        Text("Total: ${snapshot.spend.totalLabel}", modifier = Modifier.testTag("spend-total"))
+        snapshot.spend.categories.forEach { category ->
+            Text("${category.category}: ${category.amountLabel}", style = MaterialTheme.typography.bodySmall)
         }
     }
 }
