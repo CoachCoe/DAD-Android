@@ -167,6 +167,9 @@ class MainActivity : ComponentActivity() {
         val network = BuildConfig.DEBUG && intent.getBooleanExtra("preview_network", false)
         val events = BuildConfig.DEBUG && intent.getBooleanExtra("preview_events", false)
         val settings = BuildConfig.DEBUG && intent.getBooleanExtra("preview_settings", false)
+        val partner = BuildConfig.DEBUG && intent.getBooleanExtra("preview_partner", false)
+        val partnerViewer = BuildConfig.DEBUG && intent.getBooleanExtra("preview_partner_viewer", false)
+        val partnerPending = BuildConfig.DEBUG && intent.getBooleanExtra("preview_partner_pending", false)
         val appContext = applicationContext
         incomingLink = intent.dataString
         val factory = viewModelFactory {
@@ -208,7 +211,13 @@ class MainActivity : ComponentActivity() {
                     }
                     when (val current = root) {
                         is RoleRouter.Root.Restoring, is RoleRouter.Root.Authenticated ->
-                            if (current is RoleRouter.Root.Authenticated && current.role == AppRole.PARTNER) {
+                            if (partnerPending) {
+                                PartnerPortal(viewModel(factory = PartnerModel.previewFactory(pending = true)))
+                            } else if (partnerViewer) {
+                                PartnerPortal(viewModel(factory = PartnerModel.previewFactory(role = PartnerRole.VIEWER)))
+                            } else if (partner) {
+                                PartnerPortal(viewModel(factory = PartnerModel.previewFactory()))
+                            } else if (current is RoleRouter.Root.Authenticated && current.role == AppRole.PARTNER) {
                                 PartnerLanding()
                             } else if (giving) {
                                 // Giving preview exercises the signed-in GiftScreen directly. The
@@ -732,5 +741,105 @@ private fun ToggleRow(label: String, value: Boolean, tag: String, onChange: (Boo
     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
         Text(label, modifier = Modifier.weight(1f))
         Switch(checked = value, onCheckedChange = onChange, modifier = Modifier.testTag(tag))
+    }
+}
+
+
+// Partner portal (PRD P-*, EM-*, §7). The pending-approval gate shows nothing else (P-2); the
+// loaded portal renders verified-or-hidden Overview tiles (§7.3), spend totals, the Our People
+// rollup with <5 suppression (EM-3), and admin-gated user management (§7.2) — all inline.
+@Composable
+private fun PartnerPortal(model: PartnerModel) {
+    LaunchedEffect(Unit) { model.load() }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .safeDrawingPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp)
+            .testTag("partner-portal"),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text("Partner portal", style = MaterialTheme.typography.headlineMedium)
+        when (val phase = model.phase) {
+            is PartnerPhase.Loading ->
+                CircularProgressIndicator(modifier = Modifier.testTag("partner-loading"))
+            is PartnerPhase.Pending ->
+                // P-2: pending approval shows nothing else.
+                Column(modifier = Modifier.testTag("partner-pending"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Awaiting approval", style = MaterialTheme.typography.titleMedium)
+                    Text("Your organization’s account is pending review. We’ll email you when it’s approved.")
+                }
+            is PartnerPhase.Failed ->
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(phase.message, modifier = Modifier.testTag("partner-error"))
+                    DadPrimaryButton("Try again") { model.load() }
+                }
+            is PartnerPhase.Ready -> model.snapshot?.let { PartnerContent(model, it) }
+        }
+        model.actionError?.let { Text(it, modifier = Modifier.testTag("partner-action-error")) }
+    }
+}
+
+@Composable
+private fun PartnerContent(model: PartnerModel, snapshot: PartnerSnapshot) {
+    val overview = snapshot.overview
+    // Overview tiles — a figure renders ONLY when verified (§7.3); unverified is omitted.
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(overview.organization, style = MaterialTheme.typography.titleMedium)
+        overview.verifiedLine?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("partner-verified-line"))
+        }
+        overview.committed.label?.let {
+            Text("Committed: $it", modifier = Modifier.testTag("partner-committed"))
+        }
+        // deployed is unverified in the preview -> intentionally absent (never estimated)
+        overview.peopleReached.label?.let {
+            Text("People reached: $it", modifier = Modifier.testTag("partner-reached"))
+        }
+        overview.enrolledLabel?.let {
+            Text("Enrolled: $it", modifier = Modifier.testTag("partner-enrolled"))
+        }
+    }
+
+    // Our People rollup — figures or the suppression notice (EM-3).
+    snapshot.people?.let { people ->
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Our people", style = MaterialTheme.typography.titleMedium)
+            val notice = people.suppressionNotice
+            if (notice != null) {
+                Text(notice, modifier = Modifier.testTag("partner-suppressed"))
+            } else {
+                people.givenLabel?.let { Text("Given: $it", modifier = Modifier.testTag("partner-given")) }
+            }
+        }
+    }
+
+    // Spend totals (P-12).
+    if (snapshot.spend.isNotEmpty()) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("Spend", style = MaterialTheme.typography.titleMedium)
+            snapshot.spend.forEach { Text("${it.category}: ${it.amountLabel}", style = MaterialTheme.typography.bodySmall) }
+        }
+    }
+
+    // Users — admin can invite/remove inline; a viewer sees the list read-only (§7.2).
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Team", style = MaterialTheme.typography.titleMedium)
+        snapshot.users.forEach { user ->
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("${user.name} · ${user.role}", modifier = Modifier.weight(1f))
+                if (model.role.canManageUsers) {
+                    Button(onClick = { model.removeUser(user.id) }) { Text("Remove") }
+                }
+            }
+        }
+        if (model.role.canManageUsers) {
+            Button(onClick = { model.inviteUser("new@acme.com", PartnerRole.VIEWER) }, modifier = Modifier.testTag("partner-invite")) {
+                Text("Invite user")
+            }
+        } else {
+            Text("Read-only access", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("partner-readonly"))
+        }
     }
 }
