@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.Surface
@@ -164,6 +166,7 @@ class MainActivity : ComponentActivity() {
         val impact = BuildConfig.DEBUG && intent.getBooleanExtra("preview_impact", false)
         val network = BuildConfig.DEBUG && intent.getBooleanExtra("preview_network", false)
         val events = BuildConfig.DEBUG && intent.getBooleanExtra("preview_events", false)
+        val settings = BuildConfig.DEBUG && intent.getBooleanExtra("preview_settings", false)
         val appContext = applicationContext
         incomingLink = intent.dataString
         val factory = viewModelFactory {
@@ -218,6 +221,8 @@ class MainActivity : ComponentActivity() {
                                 NetworkBadgesHome(viewModel(factory = NetworkBadgesModel.previewFactory()))
                             } else if (events) {
                                 EventsHome(viewModel(factory = EventsModel.previewFactory()))
+                            } else if (settings) {
+                                SettingsHome(viewModel(factory = SettingsModel.previewFactory()))
                             } else {
                                 DonorLanding(model)
                             }
@@ -617,5 +622,115 @@ private fun EventRow(model: EventsModel, event: DonorEvent, confirmingCancel: St
         if (model.actionError != null) {
             Text(model.actionError!!, modifier = Modifier.testTag("events-action-error"))
         }
+    }
+}
+
+
+// Account & settings (PRD §6.11/§6.12): profile header, notification + privacy toggles, volunteer
+// opt-in, sign out, and the store-mandated delete-account flow with a typed-word confirm gate.
+// Bound to SettingsModel; all inline (no OS dialogs), per the UITest-determinism lesson.
+@Composable
+private fun SettingsHome(model: SettingsModel) {
+    LaunchedEffect(Unit) { model.load() }
+    var deleteTyped by androidx.compose.runtime.remember { mutableStateOf("") }
+    var confirmingDelete by androidx.compose.runtime.remember { mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .safeDrawingPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp)
+            .testTag("settings-home"),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text("Settings", style = MaterialTheme.typography.headlineMedium)
+        if (model.signedOut) {
+            Text("You're signed out.", modifier = Modifier.testTag("settings-signed-out"))
+            return@Column
+        }
+        when (val phase = model.phase) {
+            is SettingsPhase.Loading ->
+                CircularProgressIndicator(modifier = Modifier.testTag("settings-loading"))
+            is SettingsPhase.Failed ->
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(phase.message, modifier = Modifier.testTag("settings-error"))
+                    DadPrimaryButton("Try again") { model.load() }
+                }
+            is SettingsPhase.Ready -> model.snapshot?.let { snapshot ->
+                SettingsContent(model, snapshot, confirmingDelete, deleteTyped,
+                    onConfirmingChange = { confirmingDelete = it }, onTypedChange = { deleteTyped = it })
+            }
+        }
+        model.actionError?.let { Text(it, modifier = Modifier.testTag("settings-action-error")) }
+    }
+}
+
+@Composable
+private fun SettingsContent(
+    model: SettingsModel, snapshot: SettingsSnapshot, confirmingDelete: Boolean, deleteTyped: String,
+    onConfirmingChange: (Boolean) -> Unit, onTypedChange: (String) -> Unit,
+) {
+    // Profile header — role is immutable (D-1), ZIP drives streak day rollover.
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(snapshot.profile.email, style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("settings-email"))
+        Text("ZIP: ${snapshot.profile.zipLabel}", style = MaterialTheme.typography.bodySmall)
+    }
+
+    // Notification toggles (§6.11) — email then push categories. Payment-failure email is absent
+    // by design (non-toggleable server-side).
+    SettingsToggleSection("Emails", snapshot.preferences.emailToggles, model)
+    SettingsToggleSection("Notifications", snapshot.preferences.pushToggles, model)
+
+    // Privacy / participation switches.
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Privacy", style = MaterialTheme.typography.titleMedium)
+        ToggleRow("Show my ranking", snapshot.preferences.showRanking, "ranking-toggle") {
+            model.toggle("rankings_opted_out", !it) // inverted: showing = not opted out
+        }
+        ToggleRow("Network visible", snapshot.preferences.networkVisible, "network-toggle") {
+            model.toggle("network_visible", it)
+        }
+        ToggleRow("Volunteer opt-in", snapshot.preferences.volunteer, "volunteer-toggle") {
+            model.toggle("volunteer", it)
+        }
+    }
+
+    // Sign out.
+    Button(onClick = { model.signOut() }, modifier = Modifier.testTag("settings-signout")) { Text("Sign out") }
+
+    // Delete account (store-mandated, §6.12): a typed-word confirm gate, inline.
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Delete account", style = MaterialTheme.typography.titleMedium)
+        if (!confirmingDelete) {
+            Button(onClick = { onConfirmingChange(true) }, modifier = Modifier.testTag("delete-start")) { Text("Delete my account") }
+        } else {
+            Text(DeleteAccountGate(deleteTyped).helpText, style = MaterialTheme.typography.bodySmall)
+            OutlinedTextField(
+                value = deleteTyped, onValueChange = onTypedChange,
+                singleLine = true, modifier = Modifier.testTag("delete-input"),
+            )
+            Button(
+                onClick = { model.deleteAccount(DeleteAccountGate(deleteTyped)) },
+                enabled = DeleteAccountGate(deleteTyped).isConfirmed,
+                modifier = Modifier.testTag("delete-confirm"),
+            ) { Text("Permanently delete") }
+            Button(onClick = { onConfirmingChange(false); onTypedChange("") }) { Text("Keep my account") }
+        }
+    }
+}
+
+@Composable
+private fun SettingsToggleSection(title: String, toggles: List<Preferences.Toggle>, model: SettingsModel) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        toggles.forEach { t -> ToggleRow(t.label, t.value, "pref-${t.key}") { model.toggle(t.key, it) } }
+    }
+}
+
+@Composable
+private fun ToggleRow(label: String, value: Boolean, tag: String, onChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        Text(label, modifier = Modifier.weight(1f))
+        Switch(checked = value, onCheckedChange = onChange, modifier = Modifier.testTag(tag))
     }
 }
