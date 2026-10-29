@@ -175,8 +175,16 @@ class MainActivity : ComponentActivity() {
         val factory = viewModelFactory {
             initializer {
                 PreviewAccountModel { scope, failFirst ->
-                    if (BuildConfig.DAD_API_ORIGIN.isBlank()) AccountSession(PreviewAPI(failFirst), PreviewStore(), scope)
-                    else AccountSession(WireAPI(BuildConfig.DAD_API_ORIGIN), KeystoreCredentialStore(appContext), scope)
+                    if (BuildConfig.DAD_API_ORIGIN.isBlank()) {
+                        // The synthetic (PreviewAPI/PreviewStore) path must NEVER ship in a release
+                        // build — a blank origin there is a misconfiguration, not a demo mode, and
+                        // falling back would serve synthetic data as if real. Fail fast in release;
+                        // only debug builds get the synthetic fallback.
+                        check(BuildConfig.DEBUG) { "DAD_API_ORIGIN must be set for a release build" }
+                        AccountSession(PreviewAPI(failFirst), PreviewStore(), scope)
+                    } else {
+                        AccountSession(WireAPI(BuildConfig.DAD_API_ORIGIN), KeystoreCredentialStore(appContext), scope)
+                    }
                 }
             }
         }
