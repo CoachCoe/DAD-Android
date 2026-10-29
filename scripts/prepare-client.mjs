@@ -34,6 +34,14 @@ const allowed = new Set([
   // employee giving & matching (display surface)
   "employeeEnroll", "employeeJoinTeam", "employeeTeam", "employeeTeams",
   "employeeOurPeople", "employeeWorkforce",
+  // partner portal (Phase 8, P-*/EM-*); partner push is the v2.2 addition
+  "partnerRequestSignIn", "partnerAcceptInvite", "partnerSignOut",
+  "partnerOverview", "partnerInitiatives", "partnerSpend",
+  "partnerUsers", "partnerInviteUser", "partnerRemoveUser",
+  "partnerSaveProfile", "partnerLogo", "partnerSaveLogo",
+  "partnerReport", "partnerExports", "partnerRetainedReport",
+  "partnerCompanyCode", "applicationStatus",
+  "partnerRegisterPushDevice", "partnerUnregisterPushDevice",
 ]);
 for (const [path, item] of Object.entries(document.paths)) {
   for (const [method, operation] of Object.entries(item)) {
