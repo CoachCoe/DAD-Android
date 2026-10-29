@@ -163,6 +163,7 @@ class MainActivity : ComponentActivity() {
         val giving = BuildConfig.DEBUG && intent.getBooleanExtra("preview_giving", false)
         val impact = BuildConfig.DEBUG && intent.getBooleanExtra("preview_impact", false)
         val network = BuildConfig.DEBUG && intent.getBooleanExtra("preview_network", false)
+        val events = BuildConfig.DEBUG && intent.getBooleanExtra("preview_events", false)
         val appContext = applicationContext
         incomingLink = intent.dataString
         val factory = viewModelFactory {
@@ -215,6 +216,8 @@ class MainActivity : ComponentActivity() {
                                 ImpactHome(viewModel(factory = EngagementModel.previewFactory()))
                             } else if (network) {
                                 NetworkBadgesHome(viewModel(factory = NetworkBadgesModel.previewFactory()))
+                            } else if (events) {
+                                EventsHome(viewModel(factory = EventsModel.previewFactory()))
                             } else {
                                 DonorLanding(model)
                             }
@@ -530,5 +533,89 @@ private fun BadgeTile(badge: Badge) {
         Text(badge.title, style = MaterialTheme.typography.labelLarge, color = color)
         Text(if (badge.earned) "Earned" else "Locked", style = MaterialTheme.typography.labelSmall, color = color)
         Text(badge.detailLine, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+
+// Events home (PRD E-1..E-10): the events list (soonest-first, invite-only marked) with an
+// inline reserve/waitlist action per row and inline confirmations — never an OS dialog, per the
+// UITest-determinism lesson. Bound to EventsModel. The camera QR check-in (E-8) is a device seam
+// (CameraPermission in PlatformServices) validated structurally; its logic is unit-tested.
+@Composable
+private fun EventsHome(model: EventsModel) {
+    LaunchedEffect(Unit) { model.load() }
+    var confirmingCancel by androidx.compose.runtime.remember { mutableStateOf<String?>(null) }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .safeDrawingPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp)
+            .testTag("events-home"),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text("Events & volunteering", style = MaterialTheme.typography.headlineMedium)
+        when (val phase = model.phase) {
+            is EventsPhase.Loading ->
+                CircularProgressIndicator(modifier = Modifier.testTag("events-loading"))
+            is EventsPhase.Failed ->
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(phase.message, modifier = Modifier.testTag("events-error"))
+                    DadPrimaryButton("Try again") { model.load() }
+                }
+            is EventsPhase.Ready -> {
+                // Reserve confirmation (E-4) — inline, after the last reserve action.
+                model.lastOutcome?.let { outcome ->
+                    Column(
+                        modifier = Modifier.testTag("reserve-confirm"),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(outcome.confirmationTitle, style = MaterialTheme.typography.titleMedium)
+                        Text(outcome.confirmationDetail, style = MaterialTheme.typography.bodySmall)
+                        Button(onClick = { model.clearOutcome() }) { Text("Done") }
+                    }
+                }
+                model.events.forEach { event -> EventRow(model, event, confirmingCancel) { confirmingCancel = it } }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EventRow(model: EventsModel, event: DonorEvent, confirmingCancel: String?, setConfirming: (String?) -> Unit) {
+    Column(
+        modifier = Modifier.testTag("event-${event.id}"),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(event.title, style = MaterialTheme.typography.titleMedium)
+        Text("${event.venue} · ${event.spotsLabel}", style = MaterialTheme.typography.bodySmall)
+        if (event.isInviteOnly) {
+            // Invite-only marker (E-5): state in text, not colour alone.
+            Text("Invite only", style = MaterialTheme.typography.labelSmall, modifier = Modifier.testTag("invite-only-${event.id}"))
+        }
+        when (event.availability(java.util.Date())) {
+            is EventAvailability.Reservable ->
+                Button(onClick = { model.reserve(event.id) }, modifier = Modifier.testTag("reserve-${event.id}")) { Text("Reserve") }
+            EventAvailability.Waitlistable ->
+                Button(onClick = { model.reserve(event.id) }, modifier = Modifier.testTag("waitlist-${event.id}")) { Text("Join waitlist") }
+            EventAvailability.Reserved, EventAvailability.Waitlisted -> {
+                if (confirmingCancel == event.id) {
+                    // Inline cancel confirmation (no OS dialog).
+                    Column(modifier = Modifier.testTag("cancel-confirm-${event.id}"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Cancel your spot?", style = MaterialTheme.typography.bodyMedium)
+                        Button(onClick = { model.cancel(event.id); setConfirming(null) }) { Text("Give up my spot") }
+                        Button(onClick = { setConfirming(null) }) { Text("Keep it") }
+                    }
+                } else {
+                    Button(onClick = { setConfirming(event.id) }, modifier = Modifier.testTag("cancel-${event.id}")) { Text("Cancel") }
+                }
+            }
+            EventAvailability.CheckedIn -> Text("Checked in", modifier = Modifier.testTag("checkedin-${event.id}"))
+            is EventAvailability.NotYetOpen -> Text("Booking not open yet", style = MaterialTheme.typography.labelSmall)
+            EventAvailability.Cancelled -> Text("Cancelled", modifier = Modifier.testTag("cancelled-${event.id}"))
+        }
+        if (model.actionError != null) {
+            Text(model.actionError!!, modifier = Modifier.testTag("events-action-error"))
+        }
     }
 }

@@ -28,7 +28,7 @@ const allowed = new Set([
   "donorNetwork", "donorBadges", "referralCode", "conversions",
   // events (donor) + public calendar
   "donorEvents", "donorEventDetail", "reserveEvent", "cancelEvent", "checkInEvent",
-  "inviteOnlyEvents", "eventDetail", "eventCalendar",
+  "inviteOnlyEvents", "eventDetail", "eventCalendar", "donorEventCalendar",
   // push device (donor FCM) + analytics ingest + health
   "registerPushDevice", "unregisterPushDevice", "ingestAnalytics", "live",
   // employee giving & matching (display surface)
