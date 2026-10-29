@@ -11,3 +11,9 @@ DerivedData/
 xcuserdata/
 *.xcuserstate
 local.properties
+keystore.properties
+*.keystore
+*.jks
+
+# Untracked planning/requirements working docs (not shipped software).
+docs/requirements/
