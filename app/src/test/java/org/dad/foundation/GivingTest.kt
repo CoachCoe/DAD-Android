@@ -57,6 +57,9 @@ class GivingTest {
         assertEquals("$30", formatUsdMinor(3000))
         assertEquals("$12.34", formatUsdMinor(1234))
         assertEquals("$150", formatUsdMinor(15000))
+        // Thousands are grouped for readability (WCAG), matching formatMinorUsd.
+        assertEquals("$1,240", formatUsdMinor(124_000))
+        assertEquals("$12,345.67", formatUsdMinor(1_234_567))
     }
 
     // --- cancel copy (G-8/G-9) ---

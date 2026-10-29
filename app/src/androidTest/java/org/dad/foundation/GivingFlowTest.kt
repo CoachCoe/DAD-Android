@@ -50,6 +50,11 @@ class GivingFlowTest {
             compose.onNodeWithTag("cancel-confirm").assertIsDisplayed()
             compose.onNodeWithText("Keep giving").assertIsDisplayed()
             compose.onNodeWithText("End my gift").assertIsDisplayed()
+            // Confirm the cancel: the gift moves to Ending and the screen acknowledges it inline
+            // (the gift keeps running until period end) rather than the whole block vanishing.
+            compose.onNodeWithText("End my gift").performClick()
+            compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("gift-ending")).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("gift-ending").assertIsDisplayed()
         }
     }
 }

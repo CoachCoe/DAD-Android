@@ -64,8 +64,8 @@ value class GiftAmount private constructor(val dailyDollars: Int) : Comparable<G
  * decimals; display-only, never used for arithmetic.
  */
 fun formatUsdMinor(minor: Int): String {
-    if (minor % 100 == 0) return "$${minor / 100}"
-    return String.format(Locale.US, "$%.2f", minor / 100.0)
+    if (minor % 100 == 0) return String.format(Locale.US, "$%,d", minor / 100)
+    return String.format(Locale.US, "$%,.2f", minor / 100.0)
 }
 
 /**
