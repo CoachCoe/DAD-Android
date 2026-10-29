@@ -12,6 +12,9 @@ jobs:
           node-version: '24'
       - run: node scripts/check-foundation.mjs
       - run: node --test scripts/check-foundation.test.mjs
+      - name: Foundation drift (advisory)
+        run: node scripts/check-foundation-drift.mjs
+      - run: node --test scripts/check-foundation-drift.test.mjs
   android:
     # Stays GitHub-hosted: boots an x86_64 emulator that needs Linux KVM
     # (`/dev/kvm`), which the self-hosted Apple Silicon Mac cannot provide
