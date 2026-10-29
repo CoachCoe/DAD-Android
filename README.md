@@ -58,13 +58,42 @@ Custom Tabs preserve website behavior for referrals, email changes, and unimplem
 features. A claim with a web-only return destination stays on the web before consuming
 its one-use proof. Notifications admit only approved relative paths.
 
-Production app links require the final application ID, signing certificate, HTTPS VIEW
-intent filter with verified host, and matching DAD-Main assetlinks.json. The preview ID
-`org.dad.foundation.preview` is not a registered production identity. Camera, push, and
+Production app links require the signing certificate's SHA-256 in a matching
+DAD-Main `assetlinks.json`, plus an HTTPS VIEW intent filter with the verified
+host. The release build ships application ID `org.dad.foundation`; the debug
+build uses `org.dad.foundation.debug` so both install side by side. Camera, push, and
 Wallet ports are defined; provider configuration, permission timing, sign-in UI/passkeys,
 final screens, and real-device acceptance follow the PRD. No permission is requested on
 startup, analytics are not enabled, and no staging/production service is contacted by
 the synthetic preview.
+
+## Release signing
+
+The release build type enables R8 minification and resource shrinking and is
+signed from an upload keystore. Credentials are read from a gitignored
+`keystore.properties` at the repo root; `keystore.properties.example` shows the
+four required values. Without that file the release build still assembles, but
+produces an explicitly **unsigned** artifact rather than silently falling back to
+the debug key — so a misconfigured release fails loudly instead of shipping a
+debug-signed build.
+
+Application ID is `org.dad.foundation` for release and `org.dad.foundation.debug`
+for debug (so both install side by side). The ID can be changed freely up until
+the first upload to Google Play; it becomes permanent only once published.
+
+Generate an upload keystore once and keep both the `.jks` file and its passwords
+backed up safely — losing them after publishing requires a Play key reset:
+
+```sh
+keytool -genkeypair -v -keystore upload-keystore.jks \
+  -keyalg RSA -keysize 2048 -validity 10000 -alias dad-upload
+cp keystore.properties.example keystore.properties   # then fill in the values
+./gradlew :app:bundleRelease                          # signed AAB for Play
+```
+
+Bump `versionCode`/`versionName` in `app/build.gradle.kts` for each Play release.
+Device-gated pre-submission items (verified App Links against `assetlinks.json`,
+real-device FCM, Instruments/perf, store listing) remain a hands-on checklist.
 
 ## Dependency updates
 
