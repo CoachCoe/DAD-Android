@@ -9,4 +9,3 @@ interface PushRegistration {
     suspend fun register(token: String)
     suspend fun unregister()
 }
-interface WalletIssuance { suspend fun saveLink(): String }

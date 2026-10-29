@@ -334,6 +334,16 @@ private fun GiftScreen(model: GivingModel) {
             } else {
                 Button(onClick = { confirmingCancel = true }, modifier = Modifier.testTag("gift-cancel")) { Text("Cancel gift") }
             }
+        } else if (model.recurring is RecurringState.Ending) {
+            // Post-cancel acknowledgement (G-8/G-9): the gift is cancelled but keeps running until
+            // the paid period ends, and the streak continues until then. Without this the whole
+            // cancel block vanished after a successful cancel with no feedback.
+            val ending = model.recurring as RecurringState.Ending
+            Text(
+                CancelCopy.confirmation(ending.periodEnd),
+                modifier = Modifier.testTag("gift-ending"),
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
 
         when (val phase = model.phase) {
