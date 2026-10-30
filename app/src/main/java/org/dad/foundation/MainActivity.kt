@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.core.net.toUri
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -61,6 +62,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.text.DateFormat
 import java.util.Date
 import org.dad.foundation.generated.DADTokens
@@ -72,8 +75,8 @@ sealed interface AccountState {
     data object SignedOut : AccountState
 }
 
-private class PreviewStore : CredentialStore {
-    private var value: Credentials? = Credentials("preview", "preview-refresh", Long.MAX_VALUE)
+private class PreviewStore(signedIn: Boolean = true) : CredentialStore {
+    private var value: Credentials? = if (signedIn) Credentials("preview", "preview-refresh", Long.MAX_VALUE) else null
     override fun load() = value
     override fun save(value: Credentials) { this.value = value }
     override fun clear() { value = null }
@@ -88,56 +91,153 @@ private class PreviewAPI(private var failFirst: Boolean) : AccountAPI {
     override suspend fun claim(token: String): Credentials = throw AccountFailure.Unavailable
     override suspend fun logout(access: String) = Unit
 }
+/** DEBUG preview sign-in (`preview_signed_out`): accepts code 123456, never touches a network. */
+private class PreviewSignIn : SignInService {
+    override suspend fun requestPhoneCode(phone: String): String = phone
+    override suspend fun verifyPhone(handle: String, code: String): Credentials =
+        if (code == "123456") Credentials("preview", "preview-refresh", Long.MAX_VALUE) else throw AccountFailure.SignedOut
+}
+/** Preview settings tied to the live (preview) session, so signing out or deleting from the donor
+ *  shell really ends the session and routes back to sign-in, like a release build. */
+private class PreviewSessionSettings(private val session: AccountSession) : SettingsService {
+    private val inner = PreviewSettingsService()
+    override suspend fun load() = inner.load()
+    override suspend fun savePreferences(preferences: Preferences) = inner.savePreferences(preferences)
+    override suspend fun deleteAccount() { session.discardLocal() }
+    override suspend fun signOut() { session.logout() }
+}
 
-class AccountModel(private val factory: (CoroutineScope, Boolean) -> AccountSession) : ViewModel() {
+class AccountModel(
+    private val factory: (CoroutineScope, LaunchOptions) -> AppServices,
+    private val io: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
+) : ViewModel() {
     var state: AccountState by mutableStateOf(AccountState.Loading)
         private set
-    private var session: AccountSession? = null
+    private var services: AppServices? = null
+    private val bootLock = Mutex()
+    private var configurationFailed = false
+    /** True once the services exist and the launch session (restored or none) is known. */
+    var booted: Boolean by mutableStateOf(false)
+        private set
     /**
-     * Whether a session object has been (or will be) created. In preview and the real app a
-     * session always exists, so a transient Unavailable/SignedOut is a sub-state of the donor
-     * shell (recoverable via "Try again"), NOT a reason to leave for the role-select splash.
-     * Only a config failure (blank public origin with no API) leaves this false.
+     * Whether a session exists (stored credentials, or a sign-in/claim just installed one). A
+     * transient Unavailable on an existing session is a sub-state of the donor shell (recoverable via
+     * "Try again"), NOT a reason to leave for sign-in; only a session-less app goes there.
      */
-    var hasSession: Boolean by mutableStateOf(true)
+    var hasSession: Boolean by mutableStateOf(false)
+        private set
+    /** A line for the unauthenticated screen: a failed sign-in link, an ended session, or an unconfigured build. */
+    var notice: String? by mutableStateOf(null)
+        private set
+    /** Bumped on every sign-in/sign-out so per-session view models are never reused across sessions. */
+    var generation: Int by mutableIntStateOf(0)
+        private set
+    var signIn: SignInService = UnconfiguredSignIn
+        private set
+    var settings: SettingsService? = null
         private set
     private var loading = false
     private var pendingProof: String? = null
     private var completedProof: String? = null
     private var activeProof: String? = null
     private val gate = NavigationGate()
-    fun load(unavailableFirst: Boolean = false, claim: String? = null) {
+    private var options = LaunchOptions()
+
+    /** Runs sign-in verification INSIDE the session so it owns the await and the epoch guard. */
+    fun establish(): Establish = { produce ->
+        val active = services ?: throw AccountFailure.InvalidConfiguration
+        active.session.establish(produce)
+    }
+
+    /** Build the services off the main thread; a build that cannot (blank release origin) is unconfigured. */
+    private suspend fun ensureServices(): AppServices? = bootLock.withLock {
+        services?.let { return it }
+        if (configurationFailed) return null
+        try {
+            withContext(io) { factory(CoroutineScope(viewModelScope.coroutineContext + io), options) }
+                .also { services = it; signIn = it.signIn; settings = it.settings }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) {
+            configurationFailed = true
+            notice = PhoneSignInModel.NOT_CONFIGURED
+            null
+        }
+    }
+
+    /** Launch: restore the stored session, or land on sign-in. */
+    fun start(launch: LaunchOptions = LaunchOptions()) {
+        if (booted || loading) return
+        options = launch
+        viewModelScope.launch {
+            val active = ensureServices()
+            hasSession = active != null && active.session.isSignedIn()
+            booted = true
+            if (hasSession) load() else state = if (active == null) AccountState.Unavailable else AccountState.SignedOut
+        }
+    }
+
+    /** A sign-in completed (the session already holds the credentials): enter the donor shell. */
+    fun onSignedIn() {
+        notice = null
+        gate.signedIn()
+        generation++
+        hasSession = true
+        load()
+    }
+
+    /** Sign-out, account deletion or a revoked session: back to sign-in. */
+    fun onSignedOut(message: String? = null) {
+        notice = message
+        generation++
+        hasSession = false
+        state = AccountState.SignedOut
+    }
+
+    fun load(claim: String? = null) {
         if (loading) { if (claim != null) pendingProof = claim; return }
         loading = true
         state = AccountState.Loading
         viewModelScope.launch {
             var claimed = false
+            var active: AppServices? = null
             try {
-                val profile = withContext(Dispatchers.IO) {
-                    val active = session ?: factory(CoroutineScope(viewModelScope.coroutineContext + Dispatchers.IO), unavailableFirst).also { session = it }
-                    if (claim != null) { active.claim(claim); claimed = true }
-                    active.profile()
+                active = ensureServices()
+                if (active == null) { hasSession = false; state = AccountState.Unavailable; return@launch }
+                val profile = withContext(io) {
+                    if (claim != null) { active.session.claim(claim); claimed = true }
+                    active.session.profile()
                 }
+                notice = null
+                hasSession = true
                 state = AccountState.Ready(profile)
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: AccountFailure.SignedOut) { state = AccountState.SignedOut }
-            catch (_: Exception) { state = AccountState.Unavailable }
+            catch (_: AccountFailure.SignedOut) {
+                // Revoked or expired for good: the session cleared itself, so return to sign-in.
+                hasSession = false
+                notice = if (claim != null && !claimed) LINK_FAILED else SESSION_ENDED
+                state = AccountState.SignedOut
+            }
+            catch (_: Exception) {
+                state = AccountState.Unavailable
+                if (active?.session?.isSignedIn() == false) { hasSession = false; if (claim != null) notice = LINK_FAILED }
+            }
             finally {
                 loading = false
                 if (claim != null) {
-                    if (claimed) { completedProof = activeProof; gate.signedIn() }
+                    if (claimed) { completedProof = activeProof; gate.signedIn(); generation++ }
                     activeProof = null
                 }
                 pendingProof?.let { pendingProof = null; load(claim = it) }
             }
         }
     }
-    fun configurationUnavailable() { hasSession = false; state = AccountState.Unavailable }
+    fun configurationUnavailable() { hasSession = false; notice = PhoneSignInModel.NOT_CONFIGURED; state = AccountState.Unavailable }
     fun receive(value: String, router: LinkRouter): String? {
         return when (val intent = router.route(value)) {
             is LinkIntent.Account -> if (intent.destination == AccountDestination.PROFILE) {
                 gate.receive(intent.destination, state is AccountState.Ready)
-                load(); null
+                if (hasSession) load()
+                null
             } else value
             is LinkIntent.Claim -> {
                 if (intent.next != null || BuildConfig.DAD_API_ORIGIN.isBlank()) value
@@ -150,6 +250,11 @@ class AccountModel(private val factory: (CoroutineScope, Boolean) -> AccountSess
             is LinkIntent.EmailChange, is LinkIntent.Web -> value
             null -> null
         }
+    }
+
+    companion object {
+        const val LINK_FAILED = "That sign-in link didn’t work. It may have expired — request a new one."
+        const val SESSION_ENDED = "Your session has ended. Please sign in again."
     }
 }
 
@@ -170,7 +275,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val unavailable = BuildConfig.DEBUG && intent.getBooleanExtra("preview_unavailable", false)
+        val launch = LaunchOptions(
+            unavailableFirst = BuildConfig.DEBUG && intent.getBooleanExtra("preview_unavailable", false),
+            signedOut = BuildConfig.DEBUG && intent.getBooleanExtra("preview_signed_out", false),
+            stubBackend = BuildConfig.DEBUG && intent.getBooleanExtra("stub_backend", false),
+            stubDeleteBlocked = BuildConfig.DEBUG && intent.getBooleanExtra("stub_delete_blocked", false),
+        )
         val giving = BuildConfig.DEBUG && intent.getBooleanExtra("preview_giving", false)
         val impact = BuildConfig.DEBUG && intent.getBooleanExtra("preview_impact", false)
         val network = BuildConfig.DEBUG && intent.getBooleanExtra("preview_network", false)
@@ -183,23 +293,32 @@ class MainActivity : ComponentActivity() {
         incomingLink = intent.dataString
         val factory = viewModelFactory {
             initializer {
-                AccountModel { scope, failFirst ->
+                AccountModel(factory = factory@{ scope, options ->
+                    if (BuildConfig.DEBUG) DebugBackend.stub(appContext, scope, options)?.let { return@factory it }
                     if (BuildConfig.DAD_API_ORIGIN.isBlank()) {
                         // The synthetic (PreviewAPI/PreviewStore) path must NEVER ship in a release
-                        // build — a blank origin there is a misconfiguration, not a demo mode, and
-                        // falling back would serve synthetic data as if real. Fail fast in release;
-                        // only debug builds get the synthetic fallback.
+                        // build: a blank origin there is a misconfiguration, not a demo mode, and
+                        // falling back would serve synthetic data as if real. Fail fast in release
+                        // (the model then shows a "not configured" notice); only debug builds get
+                        // the synthetic fallback.
                         check(BuildConfig.DEBUG) { "DAD_API_ORIGIN must be set for a release build" }
-                        AccountSession(PreviewAPI(failFirst), PreviewStore(), scope)
+                        val session = AccountSession(PreviewAPI(options.unavailableFirst), PreviewStore(!options.signedOut), scope)
+                        AppServices(session, PreviewSignIn(), PreviewSessionSettings(session))
                     } else {
-                        AccountSession(WireAPI(BuildConfig.DAD_API_ORIGIN), KeystoreCredentialStore(appContext), scope)
+                        val session = AccountSession(WireAPI(BuildConfig.DAD_API_ORIGIN), KeystoreCredentialStore(appContext), scope)
+                        val attribution = PrefsAttributionStore(appContext)
+                        AppServices(
+                            session,
+                            WireAuth(BuildConfig.DAD_API_ORIGIN, android.os.Build.MODEL),
+                            WireSettings(ProductClient(BuildConfig.DAD_API_ORIGIN, session), onLocalWipe = { attribution.clear() }),
+                        )
                     }
-                }
+                })
             }
         }
         setContent {
             val model: AccountModel = viewModel(factory = factory)
-            LaunchedEffect(Unit) { model.load(unavailable) }
+            LaunchedEffect(Unit) { model.start(launch) }
             LaunchedEffect(linkEvent) {
                 val router = linkRouter ?: run {
                     if (BuildConfig.DAD_PUBLIC_ORIGIN.isNotBlank()) model.configurationUnavailable()
@@ -223,8 +342,8 @@ class MainActivity : ComponentActivity() {
                     // A session-backed shell is the donor journey — the donor landing owns every
                     // account sub-state (loading / ready / unavailable / signed-out) and its own
                     // recovery, so stay on it. Only a genuinely session-less app goes to role-select.
-                    LaunchedEffect(model.hasSession) {
-                        if (model.hasSession) router.signedIn(AppRole.DONOR) else router.restoredSignedOut()
+                    LaunchedEffect(model.booted, model.hasSession) {
+                        if (model.booted) { if (model.hasSession) router.signedIn(AppRole.DONOR) else router.signedOut() }
                         root = router.root
                     }
                     when (val current = root) {
@@ -235,8 +354,6 @@ class MainActivity : ComponentActivity() {
                                 PartnerPortal(viewModel(factory = PartnerModel.previewFactory(role = PartnerRole.VIEWER)))
                             } else if (partner) {
                                 PartnerPortal(viewModel(factory = PartnerModel.previewFactory()))
-                            } else if (current is RoleRouter.Root.Authenticated && current.role == AppRole.PARTNER) {
-                                PartnerLanding()
                             } else if (giving) {
                                 // Giving preview exercises the signed-in GiftScreen directly. The
                                 // donor shell reaches Restoring/Authenticated immediately (hasSession
@@ -251,11 +368,15 @@ class MainActivity : ComponentActivity() {
                             } else if (settings) {
                                 SettingsHome(viewModel(factory = SettingsModel.previewFactory()))
                             } else {
-                                DonorLanding(model)
+                                DonorShell(model)
                             }
-                        is RoleRouter.Root.Unauthenticated -> RoleSelect { role ->
-                            router.selectRole(role); router.signedIn(role); root = router.root
-                        }
+                        is RoleRouter.Root.Unauthenticated -> UnauthenticatedStack(
+                            notice = model.notice,
+                            signIn = model.signIn,
+                            establish = model.establish(),
+                            generation = model.generation,
+                            onSignedIn = { model.onSignedIn() },
+                        )
                     }
                 }
             }
@@ -263,10 +384,27 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** The donor shell: the landing, with Settings (sign-out and account deletion) one tap away. */
+@Composable
+private fun DonorShell(model: AccountModel) {
+    var inSettings by rememberSaveable { mutableStateOf(false) }
+    val service = model.settings
+    if (inSettings && service != null) {
+        BackHandler { inSettings = false }
+        SettingsHome(
+            viewModel(key = "settings-${model.generation}", factory = SettingsModel.factory(service)),
+            onBack = { inSettings = false },
+            onSignedOut = { model.onSignedOut() },
+        )
+    } else {
+        DonorLanding(model, onSettings = if (service != null) ({ inSettings = true }) else null)
+    }
+}
+
 /** The signed-in donor landing. Carries the exact copy the app has shown since the preview
  * shell, so the role-aware root is a structural change, not a visible one. */
 @Composable
-private fun DonorLanding(model: AccountModel) {
+private fun DonorLanding(model: AccountModel, onSettings: (() -> Unit)? = null) {
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.Center) {
         Text("DAD", style = MaterialTheme.typography.displayMedium, modifier = Modifier.dadHeading())
         Spacer(Modifier.height(16.dp))
@@ -284,37 +422,17 @@ private fun DonorLanding(model: AccountModel) {
                     Text("Please try again in a moment.")
                     Button(onClick = { model.load() }) { Text("Try again") }
                 }
-                AccountState.SignedOut -> Text("You’re signed out. Use your DAD sign-in link to continue.")
+                AccountState.SignedOut -> Text("You’re signed out.")
             }
+        }
+        // Settings hosts sign-out and the store-mandated in-app account deletion, so it is reachable
+        // whenever the donor is signed in, including while the profile read is retrying.
+        if (onSettings != null) {
+            Spacer(Modifier.height(20.dp))
+            Button(onClick = onSettings, modifier = Modifier.testTag("open-settings")) { Text("Settings") }
         }
         Spacer(Modifier.height(28.dp))
         if (BuildConfig.DAD_API_ORIGIN.isBlank()) Text("Preview · Sample account", style = MaterialTheme.typography.labelLarge)
-    }
-}
-
-/** Minimal partner stack placeholder — fleshed out in Phase 8. Present now so the role-aware
- * root compiles and routes both journeys. */
-@Composable
-private fun PartnerLanding() {
-    Column(modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.Center) {
-        Text("Partner portal", style = MaterialTheme.typography.displayMedium, modifier = Modifier.dadHeading())
-        Spacer(Modifier.height(16.dp))
-        Text("Your organization’s giving home.", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
-    }
-}
-
-/** Unauthenticated splash — pick a journey before signing in. The preview store starts
- * signed-in, so this path is exercised only when there is genuinely no session. */
-@Composable
-private fun RoleSelect(onSelect: (AppRole) -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.Center) {
-        Text("DAD", style = MaterialTheme.typography.displayMedium, modifier = Modifier.dadHeading())
-        Spacer(Modifier.height(16.dp))
-        Text("Good things start together.", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
-        Spacer(Modifier.height(28.dp))
-        DadPrimaryButton("I’m a donor") { onSelect(AppRole.DONOR) }
-        Spacer(Modifier.height(12.dp))
-        DadPrimaryButton("I’m a partner") { onSelect(AppRole.PARTNER) }
     }
 }
 
@@ -672,8 +790,9 @@ private fun EventRow(model: EventsModel, event: DonorEvent, confirmingCancel: St
 // opt-in, sign out, and the store-mandated delete-account flow with a typed-word confirm gate.
 // Bound to SettingsModel; all inline (no OS dialogs), per the UITest-determinism lesson.
 @Composable
-private fun SettingsHome(model: SettingsModel) {
+private fun SettingsHome(model: SettingsModel, onBack: (() -> Unit)? = null, onSignedOut: (() -> Unit)? = null) {
     LaunchedEffect(Unit) { model.load() }
+    LaunchedEffect(model.signedOut) { if (model.signedOut) onSignedOut?.invoke() }
     var deleteTyped by rememberSaveable { mutableStateOf("") }
     var confirmingDelete by rememberSaveable { mutableStateOf(false) }
     Column(
@@ -686,6 +805,7 @@ private fun SettingsHome(model: SettingsModel) {
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("Settings", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
+        if (onBack != null && !model.signedOut) Button(onClick = onBack, modifier = Modifier.testTag("settings-back")) { Text("Back") }
         if (model.signedOut) {
             Text("You're signed out.", modifier = Modifier.testTag("settings-signed-out"))
             return@Column

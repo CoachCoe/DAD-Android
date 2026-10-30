@@ -180,3 +180,52 @@ class SettingsTest {
         assertTrue(model.signedOut)
     }
 }
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class SettingsDeletionWiringTest {
+    private val dispatcher = StandardTestDispatcher()
+    @Before fun setUp() = Dispatchers.setMain(dispatcher)
+    @After fun tearDown() = Dispatchers.resetMain()
+
+    private class Service(var deleteFailure: Exception? = null) : SettingsService {
+        val calls = mutableListOf<String>()
+        override suspend fun load() = PreviewSettingsService().load()
+        override suspend fun savePreferences(preferences: Preferences) = PreviewSettingsService().load()
+        override suspend fun deleteAccount() { calls += "delete"; deleteFailure?.let { throw it } }
+        override suspend fun signOut() { calls += "signOut" }
+    }
+
+    @Test fun aBlockedDeletionExplainsItAndStaysInSettings() = runTest {
+        val service = Service(AccountFailure.DeletionBlocked)
+        val model = SettingsModel(service)
+        model.deleteAccount(DeleteAccountGate("DELETE"))
+        dispatcher.scheduler.advanceUntilIdle()
+        assertFalse(model.signedOut)
+        assertTrue(model.actionError!!.contains("Cancel your monthly gift first"))
+        assertEquals(listOf("delete"), service.calls)
+        service.deleteFailure = null
+        model.deleteAccount(DeleteAccountGate("DELETE"))
+        dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(model.signedOut)
+    }
+
+    @Test fun throttledDeletionAsksToWait() = runTest {
+        val model = SettingsModel(Service(AccountFailure.RateLimited))
+        model.deleteAccount(DeleteAccountGate("DELETE"))
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals("Too many attempts. Please wait a moment and try again.", model.actionError)
+        assertFalse(model.signedOut)
+    }
+
+    @Test fun deletionServerFirstThenSignedOut() = runTest {
+        val service = Service()
+        val model = SettingsModel(service)
+        model.deleteAccount(DeleteAccountGate("delete"))
+        dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(service.calls.isEmpty())
+        model.deleteAccount(DeleteAccountGate("DELETE"))
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(listOf("delete", "signOut"), service.calls)
+        assertTrue(model.signedOut)
+    }
+}
