@@ -114,8 +114,8 @@ data class ImpactTotals(
 // MARK: - Rankings (K-1..K-3), opt-out hides self
 
 /**
- * National/city standing. [optedOut] mirrors the profile's explicit `rankings_opted_out` flag
- * (contract v2.2.0) — it is NOT inferred from missing figures, because a donor can be unranked
+ * National/city standing. [optedOut] mirrors the explicit `rankings_opted_out` flag — read from the donor
+ * dashboard (contract v2.3.0) wherever the dashboard is the source, and the profile otherwise — — it is NOT inferred from missing figures, because a donor can be unranked
  * (null standing) without having opted out. When opted out no position is ever shown, and the UI
  * must never render a name list.
  */
@@ -130,6 +130,14 @@ data class RankingStanding(
     companion object {
         /** The standing of a donor who set `rankings_opted_out`: nothing is shown. */
         fun optedOut() = RankingStanding(null, null, null, optedOut = true)
+
+        /**
+         * Builds the standing from the dashboard's fields. [rankingsOptedOut] is the dashboard's
+         * explicit flag: true hides every figure, false with null figures means opted in but not
+         * yet ranked.
+         */
+        fun fromDashboard(nationalPercentile: Int?, city: String?, cityRank: Int?, rankingsOptedOut: Boolean) =
+            if (rankingsOptedOut) optedOut() else RankingStanding(nationalPercentile, city, cityRank)
     }
 
     /** "Top 8% nationally" (from the 92nd percentile; never "Top 0%"), or null when opted out / unknown. */
