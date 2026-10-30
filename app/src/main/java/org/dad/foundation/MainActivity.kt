@@ -89,7 +89,7 @@ private class PreviewAPI(private var failFirst: Boolean) : AccountAPI {
     override suspend fun logout(access: String) = Unit
 }
 
-class PreviewAccountModel(private val factory: (CoroutineScope, Boolean) -> AccountSession) : ViewModel() {
+class AccountModel(private val factory: (CoroutineScope, Boolean) -> AccountSession) : ViewModel() {
     var state: AccountState by mutableStateOf(AccountState.Loading)
         private set
     private var session: AccountSession? = null
@@ -183,7 +183,7 @@ class MainActivity : ComponentActivity() {
         incomingLink = intent.dataString
         val factory = viewModelFactory {
             initializer {
-                PreviewAccountModel { scope, failFirst ->
+                AccountModel { scope, failFirst ->
                     if (BuildConfig.DAD_API_ORIGIN.isBlank()) {
                         // The synthetic (PreviewAPI/PreviewStore) path must NEVER ship in a release
                         // build — a blank origin there is a misconfiguration, not a demo mode, and
@@ -198,7 +198,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         setContent {
-            val model: PreviewAccountModel = viewModel(factory = factory)
+            val model: AccountModel = viewModel(factory = factory)
             LaunchedEffect(Unit) { model.load(unavailable) }
             LaunchedEffect(linkEvent) {
                 val router = linkRouter ?: run {
@@ -265,7 +265,7 @@ class MainActivity : ComponentActivity() {
 /** The signed-in donor landing. Carries the exact copy the app has shown since the preview
  * shell, so the role-aware root is a structural change, not a visible one. */
 @Composable
-private fun DonorLanding(model: PreviewAccountModel) {
+private fun DonorLanding(model: AccountModel) {
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.Center) {
         Text("DAD", style = MaterialTheme.typography.displayMedium, modifier = Modifier.dadHeading())
         Spacer(Modifier.height(16.dp))
