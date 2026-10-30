@@ -33,6 +33,10 @@ CI runs the same on API 35 and **lint treats warnings as errors**.
   Re-vendoring requires an **actual tagged** DAD-Main mobile-foundation release — bump the
   triple, copy the files, widen the OpenAPI Generator allow-list for new ops, regenerate,
   run check-foundation + build. Never generate a client from a moving branch.
+- **Re-vendor also touches the test pin:** `scripts/check-foundation.test.mjs` hardcodes the
+  expected version (currently 2.3.0); bump it with `foundation.lock.json`.
+- **Analytics payloads must match DAD-Main's ingest allow-list** (`internal/analytics`):
+  string-to-string properties, extra keys are rejected. Pinned per event in `AttributionTest`.
 - **Generator constraints:** `anyOf` + `type: null` and `additionalProperties: false`
   need handling (the `LogoutAcknowledgement` pattern); new nullable shapes may too.
 - **Do not promote time-varying lint advisories to errors.** `NewerVersionAvailable` /

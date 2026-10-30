@@ -5,7 +5,13 @@ apps were selected on 18 October 2026. The session, transport, and deep-link fou
 is production-grade. The product screens (giving, impact, network and badges, events,
 settings, partner portal) are built against service seams and are reachable today only
 through DEBUG preview launch extras (`preview_giving`, `preview_events`, and so on);
-wiring them to the generated client is the remaining integration work.
+wiring them to the generated client is the remaining integration work. `WireAPI` binds only
+profile, claim, refresh, and logout today.
+
+Account deletion: the Settings screen, typed confirmation gate, and local-session wipe are
+built, but the real-session `SettingsService.deleteAccount()` is not wired. Only the
+preview conformer exists and it does nothing, so the app does not yet call
+`POST /donor/me/delete`. Binding `deleteAccount` is required before a Play release.
 
 ## Build and test
 
@@ -28,7 +34,8 @@ configuration deprecation diagnostics; those upstream warnings are not suppresse
 
 ## Contract, sessions, and transport
 
-`foundation.lock.json` pins the mobile foundation release (see `version`) and its manifest
+`foundation.lock.json` pins the mobile foundation release (currently 2.3.0, tag
+`mobile-foundation-v2.3.0`) and its manifest
 SHA-256. The vendored release is verified before code generation. The build invokes pinned
 OpenAPI Generator CLI 7.20.0 and generates Retrofit coroutine interfaces and Gson models
 for the operations allow-listed in `scripts/prepare-client.mjs`. No client is generated
@@ -66,8 +73,10 @@ Production app links require the signing certificate's SHA-256 in a matching
 DAD-Main `assetlinks.json`, plus an HTTPS VIEW intent filter with the verified
 host. The release build ships application ID `org.dad.foundation`; the debug
 build uses `org.dad.foundation.debug` so both install side by side. Camera, push, and
-Wallet ports are defined; provider configuration, permission timing, sign-in UI/passkeys,
-final screens, and real-device acceptance follow the PRD. No permission is requested on
+Wallet ports are defined; provider configuration, permission timing, final screens, and
+real-device acceptance follow the PRD. Phone, passkey, and OIDC sign-in operations are in
+the generated client (contract 2.3.0), but the app has no sign-in screens or `WireAPI`
+bindings for them yet; a session is established only by a claim link. No permission is requested on
 startup, analytics are not enabled, and no staging/production service is contacted by
 the synthetic preview.
 
