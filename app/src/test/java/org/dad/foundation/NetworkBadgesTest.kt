@@ -94,6 +94,17 @@ class NetworkBadgesTest {
             badges.map { it.title },
         )
         assertEquals(24, badges.map { it.code }.toSet().size)
+        // Codes are the server catalogue's (DAD-Main badges.go), in Appendix A order.
+        assertEquals(
+            listOf(
+                "F", "1D", "7", "30", "100", "Y1", "1K", "Y3", "CB", "UP", "REF1", "REF3", "REF12", "TC",
+                "IRL", "V", "SU", "V3", "V10", "INIT7", "CITY50", "NAT2", "TP", "WT",
+            ),
+            badges.map { it.code },
+        )
+        // Perk gating keys on the server codes F, 1K and TC.
+        assertEquals(setOf("F", "1K", "TC"), badges.filter { it.perk.isNotBlank() }.map { it.code }.toSet())
+        assertEquals(Badge.PERK_GATING_CODES, badges.filter { it.perk.isNotBlank() }.map { it.code }.toSet())
         // Only Founding Donor, 1,000 Days and Team Captain carry perks (B-4).
         assertEquals(setOf("Founding Donor", "1,000 Days", "Team Captain"), badges.filter { it.perk.isNotBlank() }.map { it.title }.toSet())
         assertEquals("365-day streak", badges.first { it.title == "One Year" }.rule)
@@ -228,5 +239,14 @@ class NetworkBadgesTest {
         assertEquals(NetworkBadgesPhase.Ready, model.phase)
         assertFalse(model.snapshot!!.sharing.isPublic)
         assertTrue(model.actionError != null)
+    }
+
+    @Test fun inviteOnlyAccessKeysOnServerBadgeCodes() {
+        fun badge(code: String, earned: Boolean) = Badge(code, code, "r", "", earned, null)
+        assertTrue(BadgeGrid(listOf(badge("F", true))).hasInviteOnlyAccess)
+        assertTrue(BadgeGrid(listOf(badge("1K", true))).hasInviteOnlyAccess)
+        assertTrue(BadgeGrid(listOf(badge("TC", true))).hasInviteOnlyAccess)
+        assertFalse(BadgeGrid(listOf(badge("TC", false))).hasInviteOnlyAccess) // not earned
+        assertFalse(BadgeGrid(listOf(badge("7", true), badge("FOUNDING_DONOR", true))).hasInviteOnlyAccess)
     }
 }

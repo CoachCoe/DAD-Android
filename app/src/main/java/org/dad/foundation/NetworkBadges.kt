@@ -98,6 +98,14 @@ data class Badge(
 
     /** Whether this badge's perk is active (B-4 perk gating): only once earned. */
     val perkActive: Boolean get() = earned && perk.isNotBlank()
+
+    /** Whether this earned badge unlocks invite-only events (E-5), keyed on the server's badge code. */
+    val unlocksInviteOnlyEvents: Boolean get() = earned && code in PERK_GATING_CODES
+
+    companion object {
+        /** Server badge codes that confer a perk: Founding Donor, 1,000 Days, Team Captain (B-4). */
+        val PERK_GATING_CODES: Set<String> = setOf("F", "1K", "TC")
+    }
 }
 
 /**
@@ -113,6 +121,9 @@ data class BadgeGrid(
 
     /** "7 of 24 earned" — the headline count (B-2). */
     val summaryLabel: String get() = "${earned.size} of ${badges.size} earned"
+
+    /** True when the donor holds any perk-gating badge (F, 1K, TC), i.e. invite-only events are open to them. */
+    val hasInviteOnlyAccess: Boolean get() = badges.any { it.unlocksInviteOnlyEvents }
 
     /** The active perks the donor has unlocked (B-4), for the perk display. */
     val activePerks: List<String> get() = earned.filter { it.perkActive }.map { it.perk }
