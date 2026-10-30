@@ -54,8 +54,16 @@ class AccountSession(private val api: AccountAPI, private val store: CredentialS
         }
     }
 
-    suspend fun profile(): AccountProfile {
+    /**
+     * A valid bearer access token for a product API call, refreshed via the same single-flight
+     * path [profile] uses. Throws [AccountFailure.SignedOut] when there is no usable session.
+     */
+    suspend fun accessToken(): String {
         currentCoroutineContext().ensureActive()
+        return usableCredentials().access
+    }
+
+    suspend fun profile(): AccountProfile {        currentCoroutineContext().ensureActive()
         val before = mutex.withLock { epoch }
         val current = usableCredentials()
         try { return checkedProfile(current, before) }

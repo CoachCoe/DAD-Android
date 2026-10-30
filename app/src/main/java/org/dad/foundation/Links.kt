@@ -6,7 +6,7 @@ import java.net.URI
 import java.net.URLDecoder
 
 enum class AccountDestination(val path: String) {
-    DASHBOARD("/account/dashboard"), PROFILE("/account/profile"), PAYMENT_METHOD("/account/payment-method");
+    GIFTS("/account/gifts"), DASHBOARD("/account/dashboard"), PROFILE("/account/profile"), PAYMENT_METHOD("/account/payment-method");
     companion object { fun from(path: String) = entries.firstOrNull { it.path == path } }
 }
 sealed interface LinkIntent {

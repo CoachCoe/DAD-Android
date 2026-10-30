@@ -108,6 +108,7 @@ class FoundationTest {
         assertEquals(LinkIntent.Claim(token, AccountDestination.DASHBOARD), router.route("https://public.test/account/claim#token=$token&next=/account/dashboard"))
         listOf("https://evil.test/account/dashboard", "http://public.test/account/profile", "https://user@public.test/account/profile", "https://public.test/account%2fclaim#token=$token", "https://public.test/account/claim#token=$token&next=https://evil.test", "https://public.test/account/claim#token=$token&token=$token").forEach { assertNull(it, router.route(it)) }
         assertEquals(AccountDestination.PAYMENT_METHOD, router.notification("/account/payment-method"))
+        assertEquals(AccountDestination.GIFTS, router.notification("/account/gifts"))
         assertNull(router.notification("https://public.test/account/dashboard"))
         assertTrue(router.route("https://public.test/r/friend?via=irl") is LinkIntent.Web)
         val gate = NavigationGate()

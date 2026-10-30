@@ -3,11 +3,27 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// Release signing credentials live in keystore.properties (gitignored); see
+// keystore.properties.example. Absent (CI, local debug builds) the release
+// signing config is simply not wired, so an unsigned release build fails loudly
+// rather than silently shipping a debug-signed artifact.
+val keystoreProperties: Map<String, String> =
+    rootProject.file("keystore.properties").takeIf { it.exists() }
+        ?.readLines()
+        ?.mapNotNull { line ->
+            line.trim().takeUnless { it.isEmpty() || it.startsWith("#") }
+                ?.split("=", limit = 2)
+                ?.takeIf { it.size == 2 }
+                ?.let { it[0].trim() to it[1].trim() }
+        }
+        ?.toMap()
+        ?: emptyMap()
+
 android {
     namespace = "org.dad.foundation"
     compileSdk = 37
     defaultConfig {
-        applicationId = "org.dad.foundation.preview"
+        applicationId = "org.dad.foundation"
         minSdk = 26
         targetSdk = 37
         versionCode = 1
@@ -17,15 +33,48 @@ android {
         buildConfigField("String", "DAD_API_ORIGIN", groovy.json.JsonOutput.toJson(apiOrigin))
         buildConfigField("String", "DAD_PUBLIC_ORIGIN", groovy.json.JsonOutput.toJson(providers.gradleProperty("dadPublicOrigin").orElse("").get()))
     }
+    signingConfigs {
+        if (keystoreProperties["storeFile"] != null) {
+            create("release") {
+                storeFile = file(keystoreProperties.getValue("storeFile"))
+                storePassword = keystoreProperties["storePassword"]
+                keyAlias = keystoreProperties["keyAlias"]
+                keyPassword = keystoreProperties["keyPassword"]
+            }
+        }
+    }
+    buildTypes {
+        debug {
+            // Distinct id so a debug build installs alongside a release build.
+            applicationIdSuffix = ".debug"
+        }
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.findByName("release")
+        }
+    }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     sourceSets["main"].assets.directories.add(layout.buildDirectory.dir("generated/assets").get().asFile.path)
     sourceSets["test"].resources.directories.add(layout.buildDirectory.dir("generated/assets").get().asFile.path)
+    if (providers.gradleProperty("dadIntegrationFixture").isPresent) {
+        sourceSets["test"].kotlin.directories.add("src/integrationTest/kotlin")
+    }
     sourceSets.named("main") {
         kotlin.directories.add(layout.buildDirectory.dir("generated/openapi/src/main/kotlin").get().asFile.path)
         kotlin.directories.add(layout.buildDirectory.dir("generated/tokens").get().asFile.path)
     }
-    lint { abortOnError = true; warningsAsErrors = true }
+    lint {
+        abortOnError = true
+        warningsAsErrors = true
+        // These advisories flag that a newer upstream release exists, not a code
+        // defect, so with warningsAsErrors they break CI whenever any dependency
+        // (or Gradle) ships a new version. Disable them; real lint warnings still
+        // fail the build.
+        disable += setOf("NewerVersionAvailable", "AndroidGradlePluginVersion")
+    }
 }
 
 val prepareContract = tasks.register<Exec>("prepareContract") {
@@ -63,6 +112,12 @@ val generateLinks = tasks.register<Copy>("generateLinks") {
 }
 tasks.named("preBuild") { dependsOn(generateClient, generateTokens, generateLinks) }
 
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    providers.gradleProperty("dadIntegrationFixture").orNull?.let {
+        systemProperty("dad.integration.fixture", it)
+    }
+}
+
 dependencies {
     add("codegenDependencies", "org.openapitools:openapi-generator-cli:7.20.0") { isTransitive = false }
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
@@ -75,8 +130,13 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("com.squareup.retrofit2:retrofit:3.0.0")
     implementation("com.squareup.retrofit2:converter-gson:3.0.0")
-    implementation("com.squareup.okhttp3:okhttp:5.5.0")
-    implementation("com.google.code.gson:gson:2.14.0")
+    implementation("com.squareup.okhttp3:okhttp:5.5.1")
+    implementation("com.google.code.gson:gson:2.15.0")
+    // R-1/R-2: QR generation for the IRL invite code. Pure-JVM core so the encode/decode
+    // round-trip is a unit test (no emulator).
+    implementation("com.google.zxing:core:3.5.3")
+    // D-3 (risk #4): Play Install Referrer for deferred attribution across a Play install.
+    implementation("com.android.installreferrer:installreferrer:2.2")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
