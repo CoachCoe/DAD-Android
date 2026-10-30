@@ -41,9 +41,9 @@ interface PartnerService {
     suspend fun registerPushDevice(token: String)
     suspend fun unregisterPushDevice()
 
-    /** The signed-in partner user's own id (the contract's overview carries none), or null when the
-     *  session cannot say. Used only to stop an admin removing themselves. */
-    suspend fun signedInUserId(): String? = null
+    /** The signed-in partner user's own id, taken from the overview's `user_id` (contract 2.3.0), or
+     *  null when the overview carries none. Used to stop an admin removing themselves. */
+    suspend fun signedInUserId(): String? = overview().userId
 }
 
 sealed interface PartnerPhase {
@@ -79,7 +79,7 @@ class PartnerModel(private val service: PartnerService) : ViewModel() {
                     spend = optional(emptyList()) { service.spend() },
                     people = optional(null) { service.people() },
                     users = optional(emptyList()) { service.users() },
-                    selfId = optional(null) { service.signedInUserId() },
+                    selfId = overview.userId ?: optional(null) { service.signedInUserId() },
                 )
                 phase = PartnerPhase.Ready
             } catch (error: CancellationException) {
@@ -198,6 +198,7 @@ class PreviewPartnerService(
             peopleReached = VerifiedCount(12_400, verified = true),
             employeesEnrolled = 86, workforceSize = 240, enrolledPercent = 35,
             updatedAt = Date(1_793_000_000_000), hasLogo = false,
+            userId = if (role == PartnerRole.ADMIN) "u1" else "u2",
         )
     }
 
@@ -216,7 +217,6 @@ class PreviewPartnerService(
         PartnerPeople(86, 240, 940_000, 470_000, 42, 6_300, 7, suppressed = false)
 
     override suspend fun users(): List<PartnerUser> = userList
-    override suspend fun signedInUserId(): String? = if (role == PartnerRole.ADMIN) "u1" else "u2"
     override suspend fun inviteUser(email: String, role: PartnerRole) {
         userList.add(PartnerUser("u${userList.size + 1}", email, email, role))
     }

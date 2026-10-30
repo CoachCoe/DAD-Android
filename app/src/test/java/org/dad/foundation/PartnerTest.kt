@@ -92,12 +92,11 @@ class PartnerTest {
             PartnerUser("u3", "c@x.com", "C", PartnerRole.ADMIN),
         )
         var selfId: String? = "u1"
-        override suspend fun signedInUserId(): String? = selfId
         override suspend fun overview(): PartnerOverview {
             if (pending) throw PartnerPendingApproval()
             if (fail) throw AccountFailure.SignedOut
             return PartnerOverview("Acme", "d", role, "AC", VerifiedMoney(1, true), VerifiedMoney(1, true),
-                1, VerifiedCount(1, true), 42, 120, 35, Date(), false)
+                1, VerifiedCount(1, true), 42, 120, 35, Date(), false, userId = selfId)
         }
         override suspend fun initiatives() = emptyList<PartnerInitiative>()
         override suspend fun spend() = emptyList<PartnerSpendCategory>()
@@ -188,6 +187,12 @@ class PartnerTest {
         assertTrue(!isPlausibleEmail("ada@acme"))
         assertTrue(!isPlausibleEmail("ada acme@x.com"))
         assertTrue(!isPlausibleEmail("a@@b.com"))
+        assertTrue(!isPlausibleEmail("a@b..c"))
+        assertTrue(!isPlausibleEmail("a@.b.c"))
+        assertTrue(!isPlausibleEmail("a@b.c."))
+        assertTrue(!isPlausibleEmail("@b.com"))
+        assertTrue(isPlausibleEmail("a@b.co.uk"))
+        assertTrue(!isPlausibleEmail("a".repeat(250) + "@b.com")) // > 254 chars
     }
 
     @Test fun inviteWithAMalformedEmailNeverReachesTheService() = runTest {
@@ -231,5 +236,14 @@ class PartnerTest {
         assertFalse(model.canRemove(svc.users.first { it.id == "u1" }))
         model.removeUser("u1"); dispatcher.scheduler.advanceUntilIdle()
         assertTrue(svc.removed.isEmpty())
+    }
+
+    @Test fun selfIdComesFromOverviewUserId() = runTest {
+        val svc = FakeService().apply { selfId = "u3" }
+        val model = PartnerModel(svc)
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals("u3", model.snapshot?.selfId)
+        assertEquals("u3", svc.signedInUserId())
+        assertFalse(model.canRemove(svc.users.first { it.id == "u3" }))
     }
 }

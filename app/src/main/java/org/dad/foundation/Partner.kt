@@ -27,10 +27,16 @@ enum class PartnerRole {
 /** Thousands-grouped count ("12,400") to match the grouped money figures. */
 internal fun formatCount(value: Long): String = String.format(java.util.Locale.US, "%,d", value)
 
-/** A conservative shape check before an invite is sent; the server remains the authority. */
+/** Invite-email shape check (shared with iOS): trimmed, at most 254 characters, `local@domain`
+ *  with a non-empty local part and a domain of at least two non-empty dot-separated labels, no
+ *  whitespace. The server remains the authority. */
 fun isPlausibleEmail(value: String): Boolean {
     val email = value.trim()
-    return email.length <= 254 && Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$").matches(email)
+    if (email.isEmpty() || email.length > 254 || email.any { it.isWhitespace() }) return false
+    val parts = email.split('@')
+    if (parts.size != 2 || parts[0].isEmpty()) return false
+    val labels = parts[1].split('.')
+    return labels.size >= 2 && labels.all { it.isNotEmpty() }
 }
 
 // MARK: - Verified figures (§7.3 — hidden, never estimated)
@@ -66,6 +72,8 @@ data class PartnerOverview(
     val enrolledPercent: Int?,
     val updatedAt: Date?,
     val hasLogo: Boolean,
+    /** The calling partner user's own id (contract 2.3.0 overview `user_id`); null when absent. */
+    val userId: String? = null,
 ) {
     /** "42 of 120" or null when suppressed (<5). Never shows a suppressed count. */
     val enrolledLabel: String? get() = employeesEnrolled?.let { "$it of $workforceSize" }
