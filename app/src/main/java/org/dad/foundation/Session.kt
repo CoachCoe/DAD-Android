@@ -63,7 +63,8 @@ class AccountSession(private val api: AccountAPI, private val store: CredentialS
         return usableCredentials().access
     }
 
-    suspend fun profile(): AccountProfile {        currentCoroutineContext().ensureActive()
+    suspend fun profile(): AccountProfile {
+        currentCoroutineContext().ensureActive()
         val before = mutex.withLock { epoch }
         val current = usableCredentials()
         try { return checkedProfile(current, before) }
