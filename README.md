@@ -12,8 +12,8 @@ existing accounts only), claim-link sign-in, profile read, settings load/save (`
 refresh, logout and real account deletion. Authenticated calls go through `ProductClient.perform` ->
 `AccountSession.authorized` (single-flight refresh, one bounded 401 retry, epoch-guarded); sign-in
 installs credentials through `AccountSession.establish` so the session owns the await. Settings is
-reachable from the donor shell; sign-out, deletion and a revoked session return to sign-in. Passkey,
-OIDC, email signup/password and partner sign-in are not wired (partner shows an honest notice). A
+reachable from the donor shell; sign-out, deletion and a revoked session return to sign-in. Partner
+sign-in is not wired (it shows an honest notice). A
 release build with no `dadApiOrigin` shows a "not configured" notice and never serves synthetic data.
 
 Account deletion calls `POST /donor/me/delete` first and wipes local state (Keystore credentials and
@@ -42,8 +42,8 @@ configuration deprecation diagnostics; those upstream warnings are not suppresse
 
 ## Contract, sessions, and transport
 
-`foundation.lock.json` pins the mobile foundation release (currently 2.3.0, tag
-`mobile-foundation-v2.3.0`) and its manifest
+`foundation.lock.json` pins the mobile foundation release (currently 2.4.0, tag
+`mobile-foundation-v2.4.0`) and its manifest
 SHA-256. The vendored release is verified before code generation. The build invokes pinned
 OpenAPI Generator CLI 7.20.0 and generates Retrofit coroutine interfaces and Gson models
 for the operations allow-listed in `scripts/prepare-client.mjs`. No client is generated
@@ -82,10 +82,33 @@ DAD-Main `assetlinks.json`, plus an HTTPS VIEW intent filter with the verified
 host. The release build ships application ID `org.dad.foundation`; the debug
 build uses `org.dad.foundation.debug` so both install side by side. Camera, push, and
 Wallet ports are defined; provider configuration, permission timing, final screens, and
-real-device acceptance follow the PRD. Phone sign-in is wired (see above); passkey and OIDC
-sign-in operations are in the generated client (contract 2.3.0) but have no screens yet. No permission is requested on
+real-device acceptance follow the PRD. Phone, email signup and
+password sign-in are wired (see below). No permission is requested on
 startup, analytics are not enabled, and no staging/production service is contacted by
 the synthetic preview.
+
+## Sign-in methods (Phase 1b, contract 2.4.0)
+
+**Wired:** email signup (`postDonorSignup`: name, email, ZIP, city; the server emails a single-use link, which
+the app claims when it opens or from a pasted link on "Check your email"), email + password sign-in
+(`postDonorPasswordSignIn`, sends `device_name` and platform `ANDROID`), and set/change password in Settings
+(`postDonorMePassword`: a 422 with code `CURRENT_PASSWORD_INCORRECT` is a wrong current password and keeps the
+session; a real 401 refreshes once, then signs out). Passwords are masked, never logged, and cleared after send.
+
+**Built but switched off until configured:** Google sign-in (`oidcSignIn`) and passkeys
+(`beginDonorPasskeySignIn`/`finishDonorPasskeySignIn`). The server exchanges, models, UI states and stub-transport
+tests exist; the screen says "Not available yet" because no platform provider is linked. Sign in with Apple is
+not offered on Android. To turn them on you must supply:
+
+- **Both:** the AndroidX Credential Manager dependency (`androidx.credentials`, plus
+  `androidx.credentials:credentials-play-services-auth` for older devices), and an implementation of
+  `GoogleIdTokenProvider` / `PasskeyAuthenticator` passed in `ExternalSignInDeps` (not yet written, a dependency decision).
+- **Google:** a Google Cloud *web* OAuth client ID (`-PdadGoogleWebClientId=...apps.googleusercontent.com`), an Android
+  OAuth client for the release signing certificate's SHA-1, and the Google ID library
+  (`com.google.android.libraries.identity.googleid`). The same client ID must be accepted by DAD-Main's OIDC verifier.
+- **Passkeys:** the relying-party domain (`-PdadPasskeyRpId=dad.example`) and that domain's
+  `/.well-known/assetlinks.json` with the `delegate_permission/common.get_login_creds` relation for the app
+  package and release certificate fingerprint.
 
 ## Release signing
 

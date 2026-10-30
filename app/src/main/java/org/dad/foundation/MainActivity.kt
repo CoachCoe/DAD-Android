@@ -136,6 +136,10 @@ class AccountModel(
         private set
     var settings: SettingsService? = null
         private set
+    var auth: AuthServices = AuthServices(UnconfiguredSignIn, UnconfiguredCredentialAuth, UnconfiguredCredentialAuth, ExternalSignInDeps())
+        private set
+    var passwordSettings: PasswordSettingsService? = null
+        private set
     private var loading = false
     private var pendingProof: String? = null
     private var completedProof: String? = null
@@ -155,7 +159,10 @@ class AccountModel(
         if (configurationFailed) return null
         try {
             withContext(io) { factory(CoroutineScope(viewModelScope.coroutineContext + io), options) }
-                .also { services = it; signIn = it.signIn; settings = it.settings }
+                .also {
+                    services = it; signIn = it.signIn; settings = it.settings; passwordSettings = it.passwordSettings
+                    auth = AuthServices(it.signIn, it.signup, it.passwordSignIn, it.external)
+                }
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) {
             configurationFailed = true
@@ -240,7 +247,7 @@ class AccountModel(
                 null
             } else value
             is LinkIntent.Claim -> {
-                if (intent.next != null || BuildConfig.DAD_API_ORIGIN.isBlank()) value
+                if (intent.next != null || (BuildConfig.DAD_API_ORIGIN.isBlank() && !options.stubBackend)) value
                 else {
                     val digest = java.security.MessageDigest.getInstance("SHA-256").digest(intent.token.toByteArray()).joinToString("") { "%02x".format(it) }
                     if (activeProof == null && completedProof != digest) { activeProof = digest; load(claim = intent.token) }
@@ -264,8 +271,9 @@ class MainActivity : ComponentActivity() {
     private var incomingLink: String? = null
     private var linkEvent by mutableIntStateOf(0)
     private val linkRouter by lazy {
-        if (BuildConfig.DAD_PUBLIC_ORIGIN.isBlank()) null
-        else runCatching { LinkRouter(BuildConfig.DAD_PUBLIC_ORIGIN, assets.open("links.json").bufferedReader().use { it.readText() }) }.getOrNull()
+        val publicOrigin = BuildConfig.DAD_PUBLIC_ORIGIN.ifBlank { if (BuildConfig.DEBUG && intent.getBooleanExtra("stub_backend", false)) DebugBackend.PUBLIC_ORIGIN else "" }
+        if (publicOrigin.isBlank()) null
+        else runCatching { LinkRouter(publicOrigin, assets.open("links.json").bufferedReader().use { it.readText() }) }.getOrNull()
     }
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -307,10 +315,20 @@ class MainActivity : ComponentActivity() {
                     } else {
                         val session = AccountSession(WireAPI(BuildConfig.DAD_API_ORIGIN), KeystoreCredentialStore(appContext), scope)
                         val attribution = PrefsAttributionStore(appContext)
+                        val credentialAuth = WireCredentialAuth(BuildConfig.DAD_API_ORIGIN, android.os.Build.MODEL)
+                        val external = WireExternalSignIn(BuildConfig.DAD_API_ORIGIN, android.os.Build.MODEL)
                         AppServices(
                             session,
                             WireAuth(BuildConfig.DAD_API_ORIGIN, android.os.Build.MODEL),
                             WireSettings(ProductClient(BuildConfig.DAD_API_ORIGIN, session), onLocalWipe = { attribution.clear() }),
+                            signup = credentialAuth,
+                            passwordSignIn = credentialAuth,
+                            passwordSettings = WirePasswordSettings(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
+                            external = ExternalSignInDeps(
+                                // No Credential Manager provider is linked, so a configured ID alone never switches a method on.
+                                capabilities = SignInCapabilities.of(SignInConfig(BuildConfig.DAD_GOOGLE_WEB_CLIENT_ID, BuildConfig.DAD_PASSKEY_RP_ID)),
+                                oidc = external, passkey = external,
+                            ),
                         )
                     }
                 })
@@ -372,8 +390,9 @@ class MainActivity : ComponentActivity() {
                             }
                         is RoleRouter.Root.Unauthenticated -> UnauthenticatedStack(
                             notice = model.notice,
-                            signIn = model.signIn,
+                            auth = model.auth,
                             establish = model.establish(),
+                            onPastedLink = { text -> linkRouter?.let { router -> PastedLink.claimToken(text, router)?.let { model.receive(text.trim(), router); true } } ?: false },
                             generation = model.generation,
                             onSignedIn = { model.onSignedIn() },
                         )
@@ -395,6 +414,9 @@ private fun DonorShell(model: AccountModel) {
             viewModel(key = "settings-${model.generation}", factory = SettingsModel.factory(service)),
             onBack = { inSettings = false },
             onSignedOut = { model.onSignedOut() },
+            password = model.passwordSettings?.let { passwordService ->
+                viewModel<PasswordChangeModel>(key = "password-${model.generation}", factory = PasswordChangeModel.factory(passwordService))
+            },
         )
     } else {
         DonorLanding(model, onSettings = if (service != null) ({ inSettings = true }) else null)
@@ -790,9 +812,12 @@ private fun EventRow(model: EventsModel, event: DonorEvent, confirmingCancel: St
 // opt-in, sign out, and the store-mandated delete-account flow with a typed-word confirm gate.
 // Bound to SettingsModel; all inline (no OS dialogs), per the UITest-determinism lesson.
 @Composable
-private fun SettingsHome(model: SettingsModel, onBack: (() -> Unit)? = null, onSignedOut: (() -> Unit)? = null) {
+private fun SettingsHome(
+    model: SettingsModel, onBack: (() -> Unit)? = null, onSignedOut: (() -> Unit)? = null, password: PasswordChangeModel? = null,
+) {
     LaunchedEffect(Unit) { model.load() }
     LaunchedEffect(model.signedOut) { if (model.signedOut) onSignedOut?.invoke() }
+    LaunchedEffect(password?.signedOut) { if (password?.signedOut == true) onSignedOut?.invoke() }
     var deleteTyped by rememberSaveable { mutableStateOf("") }
     var confirmingDelete by rememberSaveable { mutableStateOf(false) }
     Column(
@@ -820,7 +845,7 @@ private fun SettingsHome(model: SettingsModel, onBack: (() -> Unit)? = null, onS
                 }
             is SettingsPhase.Ready -> model.snapshot?.let { snapshot ->
                 SettingsContent(model, snapshot, confirmingDelete, deleteTyped,
-                    onConfirmingChange = { confirmingDelete = it }, onTypedChange = { deleteTyped = it })
+                    onConfirmingChange = { confirmingDelete = it }, onTypedChange = { deleteTyped = it }, password = password)
             }
         }
         model.actionError?.let { Text(it, modifier = Modifier.testTag("settings-action-error")) }
@@ -830,7 +855,7 @@ private fun SettingsHome(model: SettingsModel, onBack: (() -> Unit)? = null, onS
 @Composable
 private fun SettingsContent(
     model: SettingsModel, snapshot: SettingsSnapshot, confirmingDelete: Boolean, deleteTyped: String,
-    onConfirmingChange: (Boolean) -> Unit, onTypedChange: (String) -> Unit,
+    onConfirmingChange: (Boolean) -> Unit, onTypedChange: (String) -> Unit, password: PasswordChangeModel? = null,
 ) {
     // Profile header — role is immutable (D-1), ZIP drives streak day rollover.
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -856,6 +881,8 @@ private fun SettingsContent(
             model.toggle("volunteer", it)
         }
     }
+
+    password?.let { PasswordSection(it) }
 
     // Sign out.
     Button(onClick = { model.signOut() }, modifier = Modifier.testTag("settings-signout")) { Text("Sign out") }

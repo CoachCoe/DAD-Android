@@ -61,6 +61,13 @@ internal fun <T> Response<T>.checked(conflict: AccountFailure = AccountFailure.U
     }
 }
 
+/** `code` and `detail` of an error body as raw text (so an unknown or new value is simply ignored); null when absent or malformed. */
+internal fun <T> Response<T>.problem(): Pair<String?, String?> = try {
+    val json = errorBody()?.use { com.google.gson.JsonParser.parseString(it.string()).asJsonObject }
+    fun text(key: String) = json?.get(key)?.takeIf { it.isJsonPrimitive }?.asString
+    text("code") to text("detail")
+} catch (_: Exception) { null to null }
+
 internal fun <T> Response<T>.requireBody(conflict: AccountFailure = AccountFailure.Unavailable): T =
     checked(conflict).body() ?: throw AccountFailure.InvalidResponse
 

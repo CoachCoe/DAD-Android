@@ -31,6 +31,9 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         val apiOrigin = providers.gradleProperty("dadApiOrigin").orElse("").get()
         buildConfigField("String", "DAD_API_ORIGIN", groovy.json.JsonOutput.toJson(apiOrigin))
+        // Optional sign-in methods stay off until the owner supplies these (see README). Blank = off.
+        buildConfigField("String", "DAD_GOOGLE_WEB_CLIENT_ID", groovy.json.JsonOutput.toJson(providers.gradleProperty("dadGoogleWebClientId").orElse("").get()))
+        buildConfigField("String", "DAD_PASSKEY_RP_ID", groovy.json.JsonOutput.toJson(providers.gradleProperty("dadPasskeyRpId").orElse("").get()))
         buildConfigField("String", "DAD_PUBLIC_ORIGIN", groovy.json.JsonOutput.toJson(providers.gradleProperty("dadPublicOrigin").orElse("").get()))
     }
     signingConfigs {

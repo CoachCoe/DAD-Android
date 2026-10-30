@@ -21,6 +21,8 @@ sealed class AccountFailure : java.io.IOException() {
     data object InvalidInput : AccountFailure()
     /** 409 on account deletion: a monthly gift is still set to renew or a checkout is open. */
     data object DeletionBlocked : AccountFailure()
+    /** 422 `CURRENT_PASSWORD_INCORRECT` on set-password: a wrong typed value, NOT a bad session. Never ends the session. */
+    data object PasswordIncorrect : AccountFailure()
     /** The build has no usable API origin; nothing is ever served from a synthetic fallback. */
     data object InvalidConfiguration : AccountFailure()
 }
