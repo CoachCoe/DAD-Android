@@ -32,7 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.activity.compose.BackHandler
 
-private enum class AuthStep { RoleSelect, Methods, Phone, Partner }
+private enum class AuthStep { RoleSelect, Methods, Phone, Password, Signup, Partner }
 
 /**
  * The unauthenticated stack: role select -> sign-in methods -> the chosen method's flow. Verification
@@ -41,27 +41,38 @@ private enum class AuthStep { RoleSelect, Methods, Phone, Partner }
 @Composable
 fun UnauthenticatedStack(
     notice: String?,
-    signIn: SignInService,
+    auth: AuthServices,
     establish: Establish,
     generation: Int,
     onSignedIn: () -> Unit,
+    /** Claims a sign-in link pasted by the donor; false when the text is not a DAD sign-in link. */
+    onPastedLink: (String) -> Boolean = { false },
 ) {
     var step by rememberSaveable { mutableStateOf(AuthStep.RoleSelect) }
     BackHandler(enabled = step != AuthStep.RoleSelect) {
-        step = if (step == AuthStep.Phone) AuthStep.Methods else AuthStep.RoleSelect
+        step = if (step == AuthStep.Phone || step == AuthStep.Password || step == AuthStep.Signup) AuthStep.Methods else AuthStep.RoleSelect
     }
     when (step) {
         AuthStep.RoleSelect -> RoleSelect(notice) { role -> step = if (role == AppRole.DONOR) AuthStep.Methods else AuthStep.Partner }
-        AuthStep.Methods -> SignInMethods(onPhone = { step = AuthStep.Phone }, onBack = { step = AuthStep.RoleSelect })
+        AuthStep.Methods -> SignInMethods(
+            auth.external, establish, generation, onSignedIn,
+            onPhone = { step = AuthStep.Phone }, onPassword = { step = AuthStep.Password }, onSignup = { step = AuthStep.Signup },
+            onBack = { step = AuthStep.RoleSelect })
         AuthStep.Phone -> PhoneSignIn(
             // Keyed by session generation so a model that ended in SignedIn is never reused for the next sign-in.
-            viewModel(key = "phone-sign-in-$generation", factory = PhoneSignInModel.factory(signIn, establish)), onSignedIn)
+            viewModel(key = "phone-sign-in-$generation", factory = PhoneSignInModel.factory(auth.phone, establish)), onSignedIn)
+        AuthStep.Password -> PasswordSignInFlow(
+            viewModel(key = "password-sign-in-$generation", factory = PasswordSignInModel.factory(auth.password, establish)),
+            onSignedIn, onBack = { step = AuthStep.Methods })
+        AuthStep.Signup -> SignupFlow(
+            viewModel(key = "signup-$generation", factory = SignupModel.factory(auth.signup)),
+            onPastedLink, notice, onBack = { step = AuthStep.Methods })
         AuthStep.Partner -> PartnerSignInNotice(onBack = { step = AuthStep.RoleSelect })
     }
 }
 
 @Composable
-private fun AuthColumn(tag: String, content: @Composable () -> Unit) {
+internal fun AuthColumn(tag: String, content: @Composable () -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp).testTag(tag),
         verticalArrangement = Arrangement.Center,
@@ -89,14 +100,24 @@ fun RoleSelect(notice: String?, onSelect: (AppRole) -> Unit) {
 }
 
 @Composable
-private fun SignInMethods(onPhone: () -> Unit, onBack: () -> Unit) {
+private fun SignInMethods(
+    external: ExternalSignInDeps, establish: Establish, generation: Int, onSignedIn: () -> Unit,
+    onPhone: () -> Unit, onPassword: () -> Unit, onSignup: () -> Unit, onBack: () -> Unit,
+) {
     AuthColumn("sign-in-methods") {
         Text("Sign in", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
         Spacer(Modifier.height(20.dp))
         DadPrimaryButton("Sign in with your phone", Modifier.testTag("method-phone"), onPhone)
         Spacer(Modifier.height(12.dp))
-        Text("Other sign-in methods aren’t available in the app yet. Use your DAD sign-in link from email to continue.",
-            style = MaterialTheme.typography.bodyMedium)
+        DadPrimaryButton("Sign in with email and password", Modifier.testTag("method-password"), onPassword)
+        Spacer(Modifier.height(12.dp))
+        ExternalMethods(external, establish, generation, onSignedIn)
+        Spacer(Modifier.height(20.dp))
+        Text("New to DAD?", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
+        Spacer(Modifier.height(8.dp))
+        DadPrimaryButton("Create an account", Modifier.testTag("method-signup"), onSignup)
+        Spacer(Modifier.height(12.dp))
+        Text("Already have a DAD sign-in link in your email? Open it on this phone to continue.", style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(12.dp))
         Button(onClick = onBack) { Text("Back") }
     }
