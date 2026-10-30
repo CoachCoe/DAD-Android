@@ -457,6 +457,9 @@ private fun ImpactContent(model: EngagementModel, snapshot: EngagementSnapshot) 
                 Text(it, modifier = Modifier.testTag("ranking-national"))
             }
             snapshot.ranking.cityLabel?.let { Text(it, modifier = Modifier.testTag("ranking-city")) }
+            if (snapshot.ranking.nationalLabel == null && snapshot.ranking.cityLabel == null) {
+                Text("Not ranked yet.", modifier = Modifier.testTag("ranking-unranked"))
+            }
             Button(onClick = { model.setRankingOptIn(false) }, modifier = Modifier.testTag("ranking-optout")) { Text("Hide my ranking") }
         }
     }

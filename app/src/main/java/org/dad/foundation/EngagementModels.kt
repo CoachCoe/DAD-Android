@@ -36,7 +36,7 @@ data class EngagementSnapshot(
 interface EngagementService {
     suspend fun snapshot(): EngagementSnapshot
 
-    /** Opt into or out of public rankings (K-2). Opting out yields an all-null standing. */
+    /** Opt into or out of public rankings (K-2). Opting out yields [RankingStanding.optedOut]. */
     suspend fun setRankingOptIn(optIn: Boolean): RankingStanding
 }
 
@@ -121,7 +121,7 @@ class PreviewEngagementService : EngagementService {
     private var optedIn = true
 
     private fun ranking() =
-        if (optedIn) RankingStanding(92, "Austin", 4) else RankingStanding(null, null, null)
+        if (optedIn) RankingStanding(92, "Austin", 4) else RankingStanding.optedOut()
 
     override suspend fun snapshot(): EngagementSnapshot = EngagementSnapshot(
         today = TodayInitiative(

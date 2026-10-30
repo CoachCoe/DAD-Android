@@ -114,21 +114,30 @@ data class ImpactTotals(
 // MARK: - Rankings (K-1..K-3), opt-out hides self
 
 /**
- * National/city standing. Opting out yields an all-null standing so no position is ever shown, and
- * the UI must never render a name list.
+ * National/city standing. [optedOut] mirrors the profile's explicit `rankings_opted_out` flag
+ * (contract v2.2.0) — it is NOT inferred from missing figures, because a donor can be unranked
+ * (null standing) without having opted out. When opted out no position is ever shown, and the UI
+ * must never render a name list.
  */
 data class RankingStanding(
     val nationalPercentile: Int?,
     val city: String?,
     val cityRank: Int?,
+    val optedOut: Boolean = false,
 ) {
-    val isOptedOut: Boolean get() = nationalPercentile == null && city == null && cityRank == null
+    val isOptedOut: Boolean get() = optedOut
+
+    companion object {
+        /** The standing of a donor who set `rankings_opted_out`: nothing is shown. */
+        fun optedOut() = RankingStanding(null, null, null, optedOut = true)
+    }
 
     /** "Top 8% nationally" (from the 92nd percentile; never "Top 0%"), or null when opted out / unknown. */
-    val nationalLabel: String? get() = nationalPercentile?.let { "Top ${(100 - it).coerceAtLeast(1)}% nationally" }
+    val nationalLabel: String? get() = nationalPercentile?.takeUnless { optedOut }?.let { "Top ${(100 - it).coerceAtLeast(1)}% nationally" }
 
     /** "#4 in Austin", or null when opted out / unknown. */
     val cityLabel: String? get() {
+        if (optedOut) return null
         val c = city ?: return null
         val rank = cityRank ?: return null
         return "#$rank in $c"

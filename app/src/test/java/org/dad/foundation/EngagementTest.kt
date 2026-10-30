@@ -91,10 +91,25 @@ class EngagementTest {
 
     // --- Rankings (K-2): opt-out hides position ---
     @Test fun rankingOptedOutShowsNothing() {
-        val out = RankingStanding(nationalPercentile = null, city = null, cityRank = null)
+        val out = RankingStanding.optedOut()
         assertTrue(out.isOptedOut)
         assertNull(out.nationalLabel)
         assertNull(out.cityLabel)
+    }
+
+    @Test fun unrankedIsNotTheSameAsOptedOut() {
+        // No figures yet (e.g. a new donor) must not be reported as an opt-out.
+        val unranked = RankingStanding(nationalPercentile = null, city = null, cityRank = null)
+        assertFalse(unranked.isOptedOut)
+        assertNull(unranked.nationalLabel)
+        assertNull(unranked.cityLabel)
+    }
+
+    @Test fun optedOutHidesFiguresEvenIfTheServerSentThem() {
+        val standing = RankingStanding(92, "Austin", 4, optedOut = true)
+        assertTrue(standing.isOptedOut)
+        assertNull(standing.nationalLabel)
+        assertNull(standing.cityLabel)
     }
 
     @Test fun rankingLabelsWhenOptedIn() {
@@ -128,7 +143,7 @@ class EngagementTest {
         var failLoad: Boolean = false,
         var failToggle: Boolean = false,
     ) : EngagementService {
-        private fun ranking() = if (optedIn) RankingStanding(92, "Austin", 4) else RankingStanding(null, null, null)
+        private fun ranking() = if (optedIn) RankingStanding(92, "Austin", 4) else RankingStanding.optedOut()
         override suspend fun snapshot(): EngagementSnapshot {
             if (failLoad) throw AccountFailure.SignedOut
             return EngagementSnapshot(
