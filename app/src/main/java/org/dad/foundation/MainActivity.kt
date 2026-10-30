@@ -212,9 +212,10 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
-            val primary = tokenColor("brand-ink")
-            val colors = if (isSystemInDarkTheme()) darkColorScheme(primary = primary, background = tokenColor("ink-deep"))
-                else lightColorScheme(primary = primary, background = tokenColor("paper"))
+            val dark = isSystemInDarkTheme()
+            val primary = DadTheme.brandAccent(dark)
+            val colors = if (dark) darkColorScheme(primary = primary, onPrimary = tokenColor("ink-deep"), background = tokenColor("ink-deep"))
+                else lightColorScheme(primary = primary, onPrimary = tokenColor("paper"), background = tokenColor("paper"))
             MaterialTheme(colorScheme = colors) {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     val router = remember { RoleRouter() }
@@ -565,7 +566,8 @@ private fun BadgeTile(badge: Badge, modifier: Modifier = Modifier) {
     // Earned badges render in the brand colour; locked badges greyed. State is ALSO in the a11y
     // label + the detail line text (never colour alone) — a colour-blind or screen-reader user
     // gets earned/locked from text (B-1, WCAG).
-    val color = if (badge.earned) tokenColor("brand-ink") else Color("#5F6368".toColorInt())
+    val dark = isSystemInDarkTheme()
+    val color = if (badge.earned) DadTheme.brandAccent(dark) else DadTheme.color(if (dark) "dkmut" else "muted")
     Column(
         modifier = modifier
             .testTag(if (badge.earned) "badge-earned-${badge.code}" else "badge-locked-${badge.code}")

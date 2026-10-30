@@ -40,6 +40,34 @@ object DadTheme {
         return runCatching { Color(hex.toColorInt()) }.getOrElse { Color.Magenta }
     }
 
+    /**
+     * The brand colour for TEXT and icons on the page background. The raw `brand` token is only
+     * ~3.2:1 on paper (fails WCAG AA for normal text), so light uses `brand-ink` (5.0:1 on paper)
+     * and dark uses `brand` itself (5.5:1 on ink-deep; `brand-ink` there is only 3.5:1).
+     */
+    fun brandAccentToken(dark: Boolean): String = if (dark) "brand" else "brand-ink"
+
+    fun brandAccent(dark: Boolean): Color = color(brandAccentToken(dark))
+
+    /** Page background token for the given theme. */
+    fun backgroundToken(dark: Boolean): String = if (dark) "ink-deep" else "paper"
+
+    /** WCAG 2.x contrast ratio (1.0..21.0) between two opaque `#rgb`/`#rrggbb` tokens, by token name. */
+    fun contrast(foreground: String, background: String): Double {
+        val la = luminance(DADTokens.color.getValue(foreground))
+        val lb = luminance(DADTokens.color.getValue(background))
+        return (maxOf(la, lb) + 0.05) / (minOf(la, lb) + 0.05)
+    }
+
+    private fun luminance(hex: String): Double {
+        val digits = hex.removePrefix("#").let { if (it.length == 3) it.map { c -> "$c$c" }.joinToString("") else it }
+        fun channel(i: Int): Double {
+            val v = digits.substring(i, i + 2).toInt(16) / 255.0
+            return if (v <= 0.03928) v / 12.92 else Math.pow((v + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4)
+    }
+
     fun space(step: String): Dp = (DADTokens.space[step] ?: 0.0).dp
     fun radius(name: String): Dp = (DADTokens.radius[name] ?: 0.0).dp
 }
@@ -47,7 +75,10 @@ object DadTheme {
 /** Marks a title for TalkBack heading navigation. */
 fun Modifier.dadHeading(): Modifier = semantics { heading() }
 
-/** Primary call-to-action. 48dp minimum target, brand-on-paper with readable contrast. */
+/**
+ * Primary call-to-action. 48dp minimum target. Paper text on `brand-ink` (5.0:1, WCAG AA); the raw
+ * `brand` fill gave only 3.2:1 behind normal-size label text.
+ */
 @Composable
 fun DadPrimaryButton(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Button(
@@ -55,7 +86,7 @@ fun DadPrimaryButton(text: String, modifier: Modifier = Modifier, onClick: () ->
         modifier = modifier.fillMaxWidth().heightIn(min = 48.dp),
         shape = RoundedCornerShape(DadTheme.radius("pill")),
         colors = ButtonDefaults.buttonColors(
-            containerColor = DadTheme.color("brand"),
+            containerColor = DadTheme.color("brand-ink"),
             contentColor = DadTheme.color("paper"),
         ),
     ) { Text(text, style = MaterialTheme.typography.labelLarge) }
