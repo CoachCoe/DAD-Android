@@ -86,7 +86,13 @@ class PartnerTest {
         var removed = mutableListOf<String>()
         var pushRegistered = false
         var pushUnregistered = false
-        var users = mutableListOf(PartnerUser("u1", "a@x.com", "A", PartnerRole.ADMIN))
+        var users = mutableListOf(
+            PartnerUser("u1", "a@x.com", "A", PartnerRole.ADMIN),
+            PartnerUser("u2", "b@x.com", "B", PartnerRole.VIEWER),
+            PartnerUser("u3", "c@x.com", "C", PartnerRole.ADMIN),
+        )
+        var selfId: String? = "u1"
+        override suspend fun signedInUserId(): String? = selfId
         override suspend fun overview(): PartnerOverview {
             if (pending) throw PartnerPendingApproval()
             if (fail) throw AccountFailure.SignedOut
@@ -196,5 +202,34 @@ class PartnerTest {
     @Test fun countsAreThousandsGrouped() {
         assertEquals("12,400", VerifiedCount(12_400, verified = true).label)
         assertEquals("8,400", PartnerMetric("People reached", 8400, PartnerMetric.Unit.PEOPLE).valueLabel)
+    }
+
+    @Test fun adminCannotRemoveThemselves() = runTest {
+        val svc = FakeService()
+        val model = PartnerModel(svc)
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        assertFalse(model.canRemove(svc.users.first { it.id == "u1" }))
+        model.removeUser("u1"); dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(svc.removed.isEmpty())
+        assertTrue(model.actionError != null)
+    }
+
+    @Test fun adminCanRemoveAnotherUser() = runTest {
+        val svc = FakeService()
+        val model = PartnerModel(svc)
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(model.canRemove(svc.users.first { it.id == "u2" }))
+        model.removeUser("u2"); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(listOf("u2"), svc.removed)
+        assertNull(model.actionError)
+    }
+
+    @Test fun lastAdminCannotBeRemovedEvenWhenSelfIsUnknown() = runTest {
+        val svc = FakeService().apply { selfId = null; users.removeAll { it.id == "u3" } }
+        val model = PartnerModel(svc)
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        assertFalse(model.canRemove(svc.users.first { it.id == "u1" }))
+        model.removeUser("u1"); dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(svc.removed.isEmpty())
     }
 }

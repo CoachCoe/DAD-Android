@@ -10,6 +10,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextClearance
 import androidx.test.core.app.ActivityScenario
@@ -74,6 +75,29 @@ class PartnerFlowTest {
             // P-2: pending shows the pending notice and NO portal data.
             compose.onNodeWithTag("partner-pending").assertIsDisplayed()
             assert(compose.onAllNodes(hasTestTag("partner-committed")).fetchSemanticsNodes().isEmpty())
+        }
+    }
+
+    @Test fun removeNeedsConfirmationAndCanBeCancelled() {
+        launch("preview_partner").use {
+            compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("partner-portal")).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("partner-remove-u2").performScrollTo().performClick()
+            compose.onNodeWithTag("partner-remove-confirm-u2").performScrollTo().assertIsDisplayed()
+            // The user is still listed until the confirm; Keep backs out.
+            compose.onNodeWithTag("partner-remove-keep-u2").performScrollTo().performClick()
+            compose.onNodeWithTag("partner-remove-u2").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithTag("partner-remove-u2").performClick()
+            compose.onNodeWithTag("partner-remove-confirm-u2").performScrollTo().performClick()
+            compose.waitUntil(5_000) { compose.onAllNodes(hasText("Val Viewer · VIEWER")).fetchSemanticsNodes().isEmpty() }
+        }
+    }
+
+    @Test fun adminHasNoRemoveControlForThemselves() {
+        launch("preview_partner").use {
+            compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("partner-portal")).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("partner-invite").performScrollTo()
+            assert(compose.onAllNodes(hasTestTag("partner-remove-u1")).fetchSemanticsNodes().isEmpty())
+            compose.onNodeWithText("Ada Admin (you) · ADMIN").performScrollTo().assertIsDisplayed()
         }
     }
 }

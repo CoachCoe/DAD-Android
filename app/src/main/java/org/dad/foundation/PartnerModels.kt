@@ -22,6 +22,8 @@ data class PartnerSnapshot(
     val spend: List<PartnerSpendCategory>,
     val people: PartnerPeople?,
     val users: List<PartnerUser>,
+    /** The signed-in user's own id, when the session knows it; null when unknown. */
+    val selfId: String? = null,
 )
 
 /** Thrown by a conformer when the signed-in partner account is still awaiting approval (P-2):
@@ -38,6 +40,10 @@ interface PartnerService {
     suspend fun removeUser(id: String)
     suspend fun registerPushDevice(token: String)
     suspend fun unregisterPushDevice()
+
+    /** The signed-in partner user's own id (the contract's overview carries none), or null when the
+     *  session cannot say. Used only to stop an admin removing themselves. */
+    suspend fun signedInUserId(): String? = null
 }
 
 sealed interface PartnerPhase {
@@ -73,6 +79,7 @@ class PartnerModel(private val service: PartnerService) : ViewModel() {
                     spend = optional(emptyList()) { service.spend() },
                     people = optional(null) { service.people() },
                     users = optional(emptyList()) { service.users() },
+                    selfId = optional(null) { service.signedInUserId() },
                 )
                 phase = PartnerPhase.Ready
             } catch (error: CancellationException) {
@@ -104,8 +111,21 @@ class PartnerModel(private val service: PartnerService) : ViewModel() {
         }
     }
 
+    /**
+     * Whether [user] may be removed by the signed-in admin: never yourself, and never the last
+     * remaining admin (which also covers a session that cannot identify its own user).
+     */
+    fun canRemove(user: PartnerUser): Boolean {
+        val current = snapshot ?: return false
+        if (!role.canManageUsers || user.id == current.selfId) return false
+        val admins = current.users.count { it.role == PartnerRole.ADMIN }
+        return !(user.role == PartnerRole.ADMIN && admins <= 1)
+    }
+
     fun removeUser(id: String) {
         if (!role.canManageUsers) { actionError = "Only an admin can remove users."; return }
+        val target = snapshot?.users?.firstOrNull { it.id == id }
+        if (target == null || !canRemove(target)) { actionError = "You can't remove this user."; return }
         actionError = null
         viewModelScope.launch {
             try {
@@ -196,6 +216,7 @@ class PreviewPartnerService(
         PartnerPeople(86, 240, 940_000, 470_000, 42, 6_300, 7, suppressed = false)
 
     override suspend fun users(): List<PartnerUser> = userList
+    override suspend fun signedInUserId(): String? = if (role == PartnerRole.ADMIN) "u1" else "u2"
     override suspend fun inviteUser(email: String, role: PartnerRole) {
         userList.add(PartnerUser("u${userList.size + 1}", email, email, role))
     }

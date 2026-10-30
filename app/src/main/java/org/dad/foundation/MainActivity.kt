@@ -863,14 +863,31 @@ private fun PartnerContent(model: PartnerModel, snapshot: PartnerSnapshot) {
     // Users — admin can invite/remove inline; a viewer sees the list read-only (§7.2).
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("Team", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
+        var confirmingRemoval by rememberSaveable { mutableStateOf<String?>(null) }
         snapshot.users.forEach { user ->
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("${user.name} · ${user.role}", modifier = Modifier.weight(1f))
-                if (model.role.canManageUsers) {
-                    Button(
-                        onClick = { model.removeUser(user.id) },
-                        modifier = Modifier.semantics { contentDescription = "Remove ${user.name}" },
-                    ) { Text("Remove") }
+                val isSelf = user.id == snapshot.selfId
+                Text("${user.name}${if (isSelf) " (you)" else ""} · ${user.role}", modifier = Modifier.weight(1f))
+                if (model.canRemove(user)) {
+                    if (confirmingRemoval == user.id) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { model.removeUser(user.id); confirmingRemoval = null },
+                                modifier = Modifier.testTag("partner-remove-confirm-${user.id}")
+                                    .semantics { contentDescription = "Confirm remove ${user.name}" },
+                            ) { Text("Yes, remove") }
+                            Button(
+                                onClick = { confirmingRemoval = null },
+                                modifier = Modifier.testTag("partner-remove-keep-${user.id}"),
+                            ) { Text("Keep") }
+                        }
+                    } else {
+                        Button(
+                            onClick = { confirmingRemoval = user.id },
+                            modifier = Modifier.testTag("partner-remove-${user.id}")
+                                .semantics { contentDescription = "Remove ${user.name}" },
+                        ) { Text("Remove") }
+                    }
                 }
             }
         }
