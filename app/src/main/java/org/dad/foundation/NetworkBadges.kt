@@ -93,8 +93,8 @@ data class Badge(
     val accessibilityLabel: String
         get() = if (earned) "$title, earned" else "$title, locked. $rule"
 
-    /** The secondary line under the title: the rule when locked, the perk when earned. */
-    val detailLine: String get() = if (earned) perk else rule
+    /** The secondary line under the title: the rule when locked, the perk when earned (the rule again for a badge with no perk). */
+    val detailLine: String get() = if (earned) perk.ifBlank { rule } else rule
 
     /** Whether this badge's perk is active (B-4 perk gating): only once earned. */
     val perkActive: Boolean get() = earned && perk.isNotBlank()

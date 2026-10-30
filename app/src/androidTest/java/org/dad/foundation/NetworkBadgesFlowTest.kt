@@ -48,14 +48,14 @@ class NetworkBadgesFlowTest {
         launch().use {
             compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("badge-summary")).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("badge-summary").performScrollTo().assertIsDisplayed()
-            // An earned badge (Founding Donor) and a locked badge (Legacy) both render — state is
+            // An earned badge (Founding Donor) and a locked badge (Winning Team) both render — state is
             // carried in the tile tag + the a11y label, not colour alone (B-1). The badge grid is a
-            // non-lazy Column so every tile composes; FOUNDING_DONOR is in the viewport, while LEGACY
+            // non-lazy Column so every tile composes; FOUNDING_DONOR is in the viewport, while WINNING_TEAM
             // (the 24th tile) is scrolled off-screen, so it is asserted present (assertExists) rather
             // than displayed — both prove the tile is in the tree with its locked state in text.
             compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("badge-earned-FOUNDING_DONOR")).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("badge-earned-FOUNDING_DONOR").performScrollTo().assertIsDisplayed()
-            compose.onNodeWithTag("badge-locked-LEGACY").assertExists()
+            compose.onNodeWithTag("badge-locked-WINNING_TEAM").assertExists()
         }
     }
 

@@ -116,7 +116,7 @@ class NetworkBadgesModel(
 
 /**
  * In-memory network/badges service for previews and Compose UI tests. One known snapshot: a
- * 5-person network with 2 anonymous, a next milestone, a 24-badge catalogue with 7 earned, and a
+ * 5-person network with 2 anonymous, a next milestone, the 24-badge Appendix A catalogue with 7 earned, and a
  * donor who starts anonymous (the "choose a public name" opt-in flips them public and mints links).
  */
 class PreviewNetworkBadgesService : NetworkBadgesService {
@@ -126,7 +126,7 @@ class PreviewNetworkBadgesService : NetworkBadgesService {
         network = NetworkView(
             activeCount = 5,
             annualizedMinor = 348_000,
-            nextMilestone = NetworkMilestone(label = "Circle of 10", target = 10, remaining = 5),
+            nextMilestone = NetworkMilestone(label = "Brought 12 In", target = 12, remaining = 7),
             invitees = listOf(
                 NetworkInvitee("Alex C.", active = true),
                 NetworkInvitee("Jordan M.", active = true),
@@ -149,51 +149,45 @@ class PreviewNetworkBadgesService : NetworkBadgesService {
 
     private fun previewBadges(): List<Badge> {
         val earnedAt = OffsetDateTime.parse("2026-06-01T00:00:00Z")
-        // The 24-badge catalogue (Appendix A): 7 earned, 17 locked — every one carries a rule
-        // (for the locked state) and a perk (for the earned/gating state).
+        // Titles, rules and perks are verbatim from PRD Appendix A (approved 2026-10-23); "—" perks are blank.
         val specs = listOf(
-            Triple("FOUNDING_DONOR", "Founding Donor", "Give before January 2027"),
-            Triple("FIRST_GIFT", "First Gift", "Make your first gift"),
-            Triple("WEEK_ONE", "One Week", "Give 7 days running"),
-            Triple("MONTH_ONE", "One Month", "Give 30 days running"),
-            Triple("HUNDRED_DAYS", "100 Days", "Give 100 days running"),
-            Triple("YEAR_ONE", "One Year", "Give 365 days running"),
-            Triple("THOUSAND_DAYS", "1,000 Days", "Give 1,000 days running"),
-            Triple("REFERRER", "Referrer", "Bring in your first giver"),
-            Triple("CIRCLE_5", "Circle of 5", "Bring in 5 active givers"),
-            Triple("CIRCLE_10", "Circle of 10", "Bring in 10 active givers"),
-            Triple("TEAM_CAPTAIN", "Team Captain", "Lead a workplace team"),
-            Triple("VOLUNTEER", "Volunteer", "Check in to your first event"),
-            Triple("VOLUNTEER_5", "Regular Volunteer", "Check in to 5 events"),
-            Triple("MATCHED", "Matched", "Have a gift matched by your employer"),
-            Triple("EARLY_BIRD", "Early Bird", "Reserve an invite-only event"),
-            Triple("CITY_LEADER", "City Leader", "Reach the top 1% in your city"),
-            Triple("NATIONAL_TOP", "National Top 1%", "Reach the national top 1%"),
-            Triple("STREAK_SAVER", "Streak Saver", "Recover a streak on the grace day"),
-            Triple("INITIATIVE_5", "Changemaker", "Fund 5 distinct initiatives"),
-            Triple("EVENT_HOST", "Event Host", "Volunteer at a hosted event"),
-            Triple("ANNIVERSARY", "Anniversary", "Give on your giving anniversary"),
-            Triple("GENEROUS", "Generous", "Give the $30/day maximum"),
-            Triple("CONSISTENT", "Consistent", "Give 500 days running"),
-            Triple("LEGACY", "Legacy", "Give 1,460 days running"),
+            BadgeSpec("FOUNDING_DONOR", "Founding Donor", "Started a monthly gift before January 2027, or joined the website waitlist", "Founding Donor Dinner and founding events"),
+            BadgeSpec("FIRST_DAY", "First Day", "Completed a first gift", ""),
+            BadgeSpec("ONE_WEEK", "One Week", "7-day streak", ""),
+            BadgeSpec("ONE_MONTH", "One Month", "30-day streak", ""),
+            BadgeSpec("HUNDRED", "Hundred", "100-day streak", ""),
+            BadgeSpec("ONE_YEAR", "One Year", "365-day streak", ""),
+            BadgeSpec("THOUSAND_DAYS", "1,000 Days", "1,000-day streak", "Invite-only milestone events"),
+            BadgeSpec("THREE_YEARS", "Three Years", "1,095-day streak", ""),
+            BadgeSpec("COMEBACK", "Comeback", "Restarted giving after a lapse and reached 30 days", ""),
+            BadgeSpec("LEVEL_UP", "Level Up", "Raised their daily amount", ""),
+            BadgeSpec("FIRST_REFERRAL", "First Referral", "First person they invited completed a gift", ""),
+            BadgeSpec("BROUGHT_3", "Brought 3 In", "3 converted referrals", ""),
+            BadgeSpec("BROUGHT_12", "Brought 12 In", "12 converted referrals", ""),
+            BadgeSpec("TEAM_CAPTAIN", "Team Captain", "20 converted referrals", "Invite-only events; DAD merch; reserve event spots 48 hours early; name listed on initiative pages (opt-in)"),
+            BadgeSpec("IRL", "IRL", "Someone joined by scanning their IRL code", ""),
+            BadgeSpec("VOLUNTEER", "Volunteer", "Opted in as a volunteer", ""),
+            BadgeSpec("SHOWED_UP", "Showed Up", "First event check-in", ""),
+            BadgeSpec("VOLUNTEER_X3", "Volunteer ×3", "3 event check-ins", ""),
+            BadgeSpec("VOLUNTEER_X10", "Volunteer ×10", "10 event check-ins", ""),
+            BadgeSpec("SEVEN_INITIATIVES", "7 Initiatives", "Funded 7 distinct initiatives", ""),
+            BadgeSpec("TOP_50_CITY", "Top 50 City", "Ranked top 50 in their city", ""),
+            BadgeSpec("TOP_2_PERCENT", "Top 2%", "National top 2% by streak", ""),
+            BadgeSpec("TEAM_PLAYER", "Team Player", "Joined a company team", ""),
+            BadgeSpec("WINNING_TEAM", "Winning Team", "Their team finished a month at #1 on the company leaderboard", ""),
         )
-        return specs.mapIndexed { index, (code, title, rule) ->
+        return specs.mapIndexed { index, (code, title, rule, perk) ->
             val earned = index < 7
             Badge(
                 code = code,
                 title = title,
                 rule = rule,
-                perk = perkFor(code),
+                perk = perk,
                 earned = earned,
                 earnedAt = if (earned) earnedAt else null,
             )
         }
     }
 
-    private fun perkFor(code: String): String = when (code) {
-        "FOUNDING_DONOR" -> "Founding Donor recognition"
-        "THOUSAND_DAYS" -> "1,000 Days recognition"
-        "TEAM_CAPTAIN" -> "Team Captain tools"
-        else -> "Recognition"
-    }
+    private data class BadgeSpec(val code: String, val title: String, val rule: String, val perk: String)
 }

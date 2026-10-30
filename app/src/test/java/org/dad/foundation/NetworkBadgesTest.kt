@@ -82,6 +82,23 @@ class NetworkBadgesTest {
         }
     }
 
+    @Test fun previewCatalogueMatchesPrdAppendixA() {
+        val badges = kotlinx.coroutines.runBlocking { PreviewNetworkBadgesService().snapshot().grid.badges }
+        assertEquals(
+            listOf(
+                "Founding Donor", "First Day", "One Week", "One Month", "Hundred", "One Year", "1,000 Days",
+                "Three Years", "Comeback", "Level Up", "First Referral", "Brought 3 In", "Brought 12 In",
+                "Team Captain", "IRL", "Volunteer", "Showed Up", "Volunteer ×3", "Volunteer ×10",
+                "7 Initiatives", "Top 50 City", "Top 2%", "Team Player", "Winning Team",
+            ),
+            badges.map { it.title },
+        )
+        assertEquals(24, badges.map { it.code }.toSet().size)
+        // Only Founding Donor, 1,000 Days and Team Captain carry perks (B-4).
+        assertEquals(setOf("Founding Donor", "1,000 Days", "Team Captain"), badges.filter { it.perk.isNotBlank() }.map { it.title }.toSet())
+        assertEquals("365-day streak", badges.first { it.title == "One Year" }.rule)
+    }
+
     // --- Network (N-1..N-3): anonymous referrals are counted, never named ---
     @Test fun networkCountsAnonymousButNeverNamesThem() {
         val net = NetworkView(
