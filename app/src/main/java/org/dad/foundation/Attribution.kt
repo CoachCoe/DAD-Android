@@ -105,9 +105,9 @@ class AttributionCapture(private val store: AttributionStore, private val analyt
 }
 
 /**
- * Play Install Referrer seam (D-3 deferred deep linking). The real implementation wraps
- * `com.android.installreferrer.api.InstallReferrerClient`; this interface lets tests replay a
- * referrer string without the Play Store. The referrer string is `utm`-style query params
+ * Play Install Referrer seam (D-3 deferred deep linking). The real implementation will wrap
+ * `com.android.installreferrer.api.InstallReferrerClient` (add the `installreferrer` dependency
+ * with it); this interface lets tests replay a referrer string without the Play Store. The referrer string is `utm`-style query params
  * (`invite=ABC&utm_source=...`), parsed into an Attribution.
  */
 interface InstallReferrer {

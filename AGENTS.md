@@ -12,7 +12,7 @@ contract. Start with these; this file only adds what they do not say.
 
 ```sh
 node scripts/check-foundation.mjs
-./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --warning-mode all
+./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleRelease :app:lintRelease --warning-mode all
 ```
 
 CI runs the same on API 35 and **lint treats warnings as errors**.

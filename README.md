@@ -1,8 +1,11 @@
 # DAD Android
 
-Kotlin/Jetpack Compose donor-app foundation using DAD-Main's Go API. Separate native
-apps were selected on 18 October 2026. Product features and navigation still require
-the mobile PRD.
+Kotlin/Jetpack Compose donor and partner app using DAD-Main's Go API. Separate native
+apps were selected on 18 October 2026. The session, transport, and deep-link foundation
+is production-grade. The product screens (giving, impact, network and badges, events,
+settings, partner portal) are built against service seams and are reachable today only
+through DEBUG preview launch extras (`preview_giving`, `preview_events`, and so on);
+wiring them to the generated client is the remaining integration work.
 
 ## Build and test
 
@@ -13,22 +16,23 @@ its own Gradle distribution.
 
 ```sh
 node scripts/check-foundation.mjs
-./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --warning-mode all
+./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleRelease :app:lintRelease --warning-mode all
 ```
 
 Open this folder in Android Studio and run the app on Android 8/API 26 or newer.
 By default it uses a labeled synthetic account through the session API. Android
-instrumentation tests cover Compose loading/retry and actual Keystore storage:
+instrumentation tests cover the Compose journeys and actual Keystore storage:
 `./gradlew :app:connectedDebugAndroidTest` with a running emulator. CI runs the same
 checks on API 35, and lint treats warnings as errors. AGP 9.4 itself emits Gradle
 configuration deprecation diagnostics; those upstream warnings are not suppressed.
 
 ## Contract, sessions, and transport
 
-`foundation.lock.json` pins mobile foundation 2.0.0 and its manifest SHA-256.
-The vendored release is verified before code generation. The build invokes pinned
+`foundation.lock.json` pins the mobile foundation release (see `version`) and its manifest
+SHA-256. The vendored release is verified before code generation. The build invokes pinned
 OpenAPI Generator CLI 7.20.0 and generates Retrofit coroutine interfaces and Gson models
-for profile, claim, refresh, and logout. No client is generated from a moving branch.
+for the operations allow-listed in `scripts/prepare-client.mjs`. No client is generated
+from a moving branch.
 Generated sources and copied tokens/link assets stay in ignored build directories.
 The application packages link rules, not the API schemas.
 

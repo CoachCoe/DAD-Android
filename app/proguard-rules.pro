@@ -12,7 +12,5 @@
 -keep class org.dad.foundation.generated.model.** { <fields>; }
 -keepclassmembers class org.dad.foundation.generated.model.** { <fields>; }
 
-# ZXing (QR encode/decode) and the Play Install Referrer client are reached
-# reflectively in places; keep their public API.
+# ZXing (QR encode/decode) is reached reflectively in places; keep its public API.
 -keep class com.google.zxing.** { *; }
--keep class com.android.installreferrer.** { *; }

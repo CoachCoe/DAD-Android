@@ -135,8 +135,6 @@ dependencies {
     // R-1/R-2: QR generation for the IRL invite code. Pure-JVM core so the encode/decode
     // round-trip is a unit test (no emulator).
     implementation("com.google.zxing:core:3.5.3")
-    // D-3 (risk #4): Play Install Referrer for deferred attribution across a Play install.
-    implementation("com.android.installreferrer:installreferrer:2.2")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
