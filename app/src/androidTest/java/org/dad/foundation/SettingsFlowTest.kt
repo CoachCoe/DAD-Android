@@ -3,8 +3,11 @@ package org.dad.foundation
 import android.content.Intent
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.isOff
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -39,6 +42,16 @@ class SettingsFlowTest {
             // A push toggle and the ranking switch are further down the scroll — scroll to them.
             compose.onNodeWithTag("pref-push_streak_at_risk").performScrollTo().assertIsDisplayed()
             compose.onNodeWithTag("ranking-toggle").performScrollTo().assertIsDisplayed()
+        }
+    }
+
+    @Test fun rankingSwitchFlipsAndPersistsThroughTheModel() {
+        launch().use {
+            compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("ranking-toggle")).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("ranking-toggle").performScrollTo().assertIsOn()
+            compose.onNodeWithTag("ranking-toggle").performClick()
+            compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("ranking-toggle") and isOff()).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("ranking-toggle").assertIsOff()
         }
     }
 

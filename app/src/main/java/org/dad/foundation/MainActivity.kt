@@ -10,9 +10,11 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -33,14 +35,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.toColorInt
 import androidx.lifecycle.ViewModel
@@ -54,6 +61,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.text.DateFormat
+import java.util.Date
 import org.dad.foundation.generated.DADTokens
 
 sealed interface AccountState {
@@ -208,8 +217,8 @@ class MainActivity : ComponentActivity() {
                 else lightColorScheme(primary = primary, background = tokenColor("paper"))
             MaterialTheme(colorScheme = colors) {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    val router = androidx.compose.runtime.remember { RoleRouter() }
-                    var root by androidx.compose.runtime.remember { mutableStateOf<RoleRouter.Root>(router.root) }
+                    val router = remember { RoleRouter() }
+                    var root by remember { mutableStateOf<RoleRouter.Root>(router.root) }
                     // A session-backed shell is the donor journey — the donor landing owns every
                     // account sub-state (loading / ready / unavailable / signed-out) and its own
                     // recovery, so stay on it. Only a genuinely session-less app goes to role-select.
@@ -258,9 +267,9 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun DonorLanding(model: PreviewAccountModel) {
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.Center) {
-        Text("DAD", style = MaterialTheme.typography.displayMedium)
+        Text("DAD", style = MaterialTheme.typography.displayMedium, modifier = Modifier.dadHeading())
         Spacer(Modifier.height(16.dp))
-        Text("Good things start together.", style = MaterialTheme.typography.headlineMedium)
+        Text("Good things start together.", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
         Spacer(Modifier.height(28.dp))
         Column(Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
             when (val state = model.state) {
@@ -287,9 +296,9 @@ private fun DonorLanding(model: PreviewAccountModel) {
 @Composable
 private fun PartnerLanding() {
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.Center) {
-        Text("Partner portal", style = MaterialTheme.typography.displayMedium)
+        Text("Partner portal", style = MaterialTheme.typography.displayMedium, modifier = Modifier.dadHeading())
         Spacer(Modifier.height(16.dp))
-        Text("Your organization’s giving home.", style = MaterialTheme.typography.headlineMedium)
+        Text("Your organization’s giving home.", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
     }
 }
 
@@ -298,9 +307,9 @@ private fun PartnerLanding() {
 @Composable
 private fun RoleSelect(onSelect: (AppRole) -> Unit) {
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.Center) {
-        Text("DAD", style = MaterialTheme.typography.displayMedium)
+        Text("DAD", style = MaterialTheme.typography.displayMedium, modifier = Modifier.dadHeading())
         Spacer(Modifier.height(16.dp))
-        Text("Good things start together.", style = MaterialTheme.typography.headlineMedium)
+        Text("Good things start together.", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
         Spacer(Modifier.height(28.dp))
         DadPrimaryButton("I’m a donor") { onSelect(AppRole.DONOR) }
         Spacer(Modifier.height(12.dp))
@@ -317,7 +326,7 @@ private fun RoleSelect(onSelect: (AppRole) -> Unit) {
 @Composable
 private fun GiftScreen(model: GivingModel) {
     LaunchedEffect(Unit) { model.load() }
-    var confirmingCancel by androidx.compose.runtime.remember { mutableStateOf(false) }
+    var confirmingCancel by rememberSaveable { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -327,7 +336,7 @@ private fun GiftScreen(model: GivingModel) {
             .testTag("gift-screen"),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Set your gift", style = MaterialTheme.typography.headlineMedium)
+        Text("Set your gift", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
         Text(
             model.selection.dailyLabel,
             style = MaterialTheme.typography.displaySmall,
@@ -343,6 +352,7 @@ private fun GiftScreen(model: GivingModel) {
         }
         DadStreakBar(filled = model.selection.dailyDollars.coerceAtMost(30))
         DadPrimaryButton("Save gift") { model.applySelection() }
+        if (model.phase == GivingPhase.Working) CircularProgressIndicator(modifier = Modifier.testTag("gift-working"))
 
         if (model.recurring is RecurringState.Active) {
             if (confirmingCancel) {
@@ -351,7 +361,7 @@ private fun GiftScreen(model: GivingModel) {
                     modifier = Modifier.testTag("cancel-confirm"),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("Cancel your gift?", style = MaterialTheme.typography.titleMedium)
+                    Text("Cancel your gift?", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
                     Text(CancelCopy.confirmation(periodEnd))
                     Button(onClick = { model.cancel(); confirmingCancel = false }) { Text("End my gift") }
                     Button(onClick = { confirmingCancel = false }) { Text("Keep giving") }
@@ -395,7 +405,7 @@ private fun ImpactHome(model: EngagementModel) {
             .testTag("impact-home"),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Your impact", style = MaterialTheme.typography.headlineMedium)
+        Text("Your impact", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
         when (val phase = model.phase) {
             is EngagementPhase.Loading ->
                 CircularProgressIndicator(modifier = Modifier.testTag("impact-loading"))
@@ -406,6 +416,7 @@ private fun ImpactHome(model: EngagementModel) {
                 }
             is EngagementPhase.Ready -> model.snapshot?.let { ImpactContent(model, it) }
         }
+        model.actionError?.let { Text(it, modifier = Modifier.testTag("impact-action-error")) }
     }
 }
 
@@ -436,7 +447,7 @@ private fun ImpactContent(model: EngagementModel, snapshot: EngagementSnapshot) 
 
     // Rankings (K-2): opt-out hides the position entirely — inline toggle, never a name list.
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("Rankings", style = MaterialTheme.typography.titleMedium)
+        Text("Rankings", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
         if (snapshot.ranking.isOptedOut) {
             Text("You're not shown in rankings.", modifier = Modifier.testTag("ranking-optedout"))
             Button(onClick = { model.setRankingOptIn(true) }, modifier = Modifier.testTag("ranking-optin")) { Text("Show my ranking") }
@@ -451,7 +462,7 @@ private fun ImpactContent(model: EngagementModel, snapshot: EngagementSnapshot) 
 
     // Spend-by-category totals (A-3) — totals only, never a line-item ledger.
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("Where it went", style = MaterialTheme.typography.titleMedium)
+        Text("Where it went", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
         Text("Total: ${snapshot.spend.totalLabel}", modifier = Modifier.testTag("spend-total"))
         snapshot.spend.categories.forEach { category ->
             Text("${category.category}: ${category.amountLabel}", style = MaterialTheme.typography.bodySmall)
@@ -475,7 +486,7 @@ private fun NetworkBadgesHome(model: NetworkBadgesModel) {
             .testTag("network-home"),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Your network & badges", style = MaterialTheme.typography.headlineMedium)
+        Text("Your network & badges", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
         when (val phase = model.phase) {
             is NetworkBadgesPhase.Loading ->
                 CircularProgressIndicator(modifier = Modifier.testTag("network-loading"))
@@ -486,6 +497,7 @@ private fun NetworkBadgesHome(model: NetworkBadgesModel) {
                 }
             is NetworkBadgesPhase.Ready -> model.snapshot?.let { NetworkBadgesContent(model, it) }
         }
+        model.actionError?.let { Text(it, modifier = Modifier.testTag("network-action-error")) }
     }
 }
 
@@ -493,7 +505,7 @@ private fun NetworkBadgesHome(model: NetworkBadgesModel) {
 private fun NetworkBadgesContent(model: NetworkBadgesModel, snapshot: NetworkBadgesSnapshot) {
     // Network summary (N-1/N-2): active count + combined annualized + next milestone.
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("Your network", style = MaterialTheme.typography.titleMedium)
+        Text("Your network", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
         Text(snapshot.network.activeLabel, style = MaterialTheme.typography.displaySmall, modifier = Modifier.testTag("network-active"))
         Text(snapshot.network.annualizedLabel, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("network-annualized"))
         snapshot.network.nextMilestone?.let {
@@ -514,40 +526,48 @@ private fun NetworkBadgesContent(model: NetworkBadgesModel, snapshot: NetworkBad
 
     // Sharing visibility (opt-in): off = anonymous, no links; choosing a public name mints links.
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("Visibility", style = MaterialTheme.typography.titleMedium)
+        Text("Visibility", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
         val sharing = snapshot.sharing
         Text(sharing.visibilityLabel, modifier = Modifier.testTag("sharing-visibility"))
         if (sharing.isPublic) {
             sharing.shareLink?.let { Text("Share: $it", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("sharing-link")) }
             sharing.inPersonLink?.let { Text("In person: $it", style = MaterialTheme.typography.bodySmall) }
         } else {
-            // A real screen takes a typed name; the preview mints one so the opt-in flow is testable.
-            Button(onClick = { model.choosePublicName("Alex C.") }, modifier = Modifier.testTag("sharing-optin")) {
-                Text("Show my name & get a referral link")
-            }
+            var publicName by rememberSaveable { mutableStateOf("") }
+            OutlinedTextField(
+                value = publicName, onValueChange = { publicName = it.take(MAX_PUBLIC_NAME) },
+                label = { Text("First name and last initial") }, singleLine = true,
+                modifier = Modifier.fillMaxWidth().testTag("sharing-name"),
+            )
+            Button(
+                onClick = { model.choosePublicName(publicName) },
+                enabled = publicName.isNotBlank(),
+                modifier = Modifier.testTag("sharing-optin"),
+            ) { Text("Show my name & get a referral link") }
         }
     }
 
     // 24-badge grid (B-1..B-4): earned-in-colour / greyed-with-rule, state in TEXT for a11y.
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Badges", style = MaterialTheme.typography.titleMedium)
+        Text("Badges", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
         Text(snapshot.grid.summaryLabel, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("badge-summary"))
         snapshot.grid.badges.chunked(2).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEach { badge -> BadgeTile(badge) }
+                row.forEach { badge -> BadgeTile(badge, Modifier.weight(1f)) }
+                if (row.size < 2) Spacer(Modifier.weight(1f))
             }
         }
     }
 }
 
 @Composable
-private fun BadgeTile(badge: Badge) {
+private fun BadgeTile(badge: Badge, modifier: Modifier = Modifier) {
     // Earned badges render in the brand colour; locked badges greyed. State is ALSO in the a11y
     // label + the detail line text (never colour alone) — a colour-blind or screen-reader user
     // gets earned/locked from text (B-1, WCAG).
-    val color = if (badge.earned) tokenColor("brand-ink") else Color("#9AA0A6".toColorInt())
+    val color = if (badge.earned) tokenColor("brand-ink") else Color("#5F6368".toColorInt())
     Column(
-        modifier = Modifier
+        modifier = modifier
             .testTag(if (badge.earned) "badge-earned-${badge.code}" else "badge-locked-${badge.code}")
             .semantics { contentDescription = badge.accessibilityLabel },
         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -566,7 +586,7 @@ private fun BadgeTile(badge: Badge) {
 @Composable
 private fun EventsHome(model: EventsModel) {
     LaunchedEffect(Unit) { model.load() }
-    var confirmingCancel by androidx.compose.runtime.remember { mutableStateOf<String?>(null) }
+    var confirmingCancel by rememberSaveable { mutableStateOf<String?>(null) }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -576,7 +596,7 @@ private fun EventsHome(model: EventsModel) {
             .testTag("events-home"),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Events & volunteering", style = MaterialTheme.typography.headlineMedium)
+        Text("Events & volunteering", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
         when (val phase = model.phase) {
             is EventsPhase.Loading ->
                 CircularProgressIndicator(modifier = Modifier.testTag("events-loading"))
@@ -586,6 +606,7 @@ private fun EventsHome(model: EventsModel) {
                     DadPrimaryButton("Try again") { model.load() }
                 }
             is EventsPhase.Ready -> {
+                model.actionError?.let { Text(it, modifier = Modifier.testTag("events-action-error")) }
                 // Reserve confirmation (E-4) — inline, after the last reserve action.
                 model.lastOutcome?.let { outcome ->
                     Column(
@@ -610,12 +631,14 @@ private fun EventRow(model: EventsModel, event: DonorEvent, confirmingCancel: St
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(event.title, style = MaterialTheme.typography.titleMedium)
+        val starts = remember(event.startsAt) { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(event.startsAt) }
+        Text(starts, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("event-start-${event.id}"))
         Text("${event.venue} · ${event.spotsLabel}", style = MaterialTheme.typography.bodySmall)
         if (event.isInviteOnly) {
             // Invite-only marker (E-5): state in text, not colour alone.
             Text("Invite only", style = MaterialTheme.typography.labelSmall, modifier = Modifier.testTag("invite-only-${event.id}"))
         }
-        when (event.availability(java.util.Date())) {
+        when (event.availability(Date())) {
             is EventAvailability.Reservable ->
                 Button(onClick = { model.reserve(event.id) }, modifier = Modifier.testTag("reserve-${event.id}")) { Text("Reserve") }
             EventAvailability.Waitlistable ->
@@ -636,9 +659,6 @@ private fun EventRow(model: EventsModel, event: DonorEvent, confirmingCancel: St
             is EventAvailability.NotYetOpen -> Text("Booking not open yet", style = MaterialTheme.typography.labelSmall)
             EventAvailability.Cancelled -> Text("Cancelled", modifier = Modifier.testTag("cancelled-${event.id}"))
         }
-        if (model.actionError != null) {
-            Text(model.actionError!!, modifier = Modifier.testTag("events-action-error"))
-        }
     }
 }
 
@@ -649,8 +669,8 @@ private fun EventRow(model: EventsModel, event: DonorEvent, confirmingCancel: St
 @Composable
 private fun SettingsHome(model: SettingsModel) {
     LaunchedEffect(Unit) { model.load() }
-    var deleteTyped by androidx.compose.runtime.remember { mutableStateOf("") }
-    var confirmingDelete by androidx.compose.runtime.remember { mutableStateOf(false) }
+    var deleteTyped by rememberSaveable { mutableStateOf("") }
+    var confirmingDelete by rememberSaveable { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -660,7 +680,7 @@ private fun SettingsHome(model: SettingsModel) {
             .testTag("settings-home"),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Settings", style = MaterialTheme.typography.headlineMedium)
+        Text("Settings", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
         if (model.signedOut) {
             Text("You're signed out.", modifier = Modifier.testTag("settings-signed-out"))
             return@Column
@@ -700,7 +720,7 @@ private fun SettingsContent(
 
     // Privacy / participation switches.
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("Privacy", style = MaterialTheme.typography.titleMedium)
+        Text("Privacy", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
         ToggleRow("Show my ranking", snapshot.preferences.showRanking, "ranking-toggle") {
             model.toggle("rankings_opted_out", !it) // inverted: showing = not opted out
         }
@@ -717,14 +737,14 @@ private fun SettingsContent(
 
     // Delete account (store-mandated, §6.12): a typed-word confirm gate, inline.
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("Delete account", style = MaterialTheme.typography.titleMedium)
+        Text("Delete account", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
         if (!confirmingDelete) {
             Button(onClick = { onConfirmingChange(true) }, modifier = Modifier.testTag("delete-start")) { Text("Delete my account") }
         } else {
             Text(DeleteAccountGate(deleteTyped).helpText, style = MaterialTheme.typography.bodySmall)
             OutlinedTextField(
                 value = deleteTyped, onValueChange = onTypedChange,
-                singleLine = true, modifier = Modifier.testTag("delete-input"),
+                singleLine = true, modifier = Modifier.fillMaxWidth().testTag("delete-input"),
             )
             Button(
                 onClick = { model.deleteAccount(DeleteAccountGate(deleteTyped)) },
@@ -746,9 +766,13 @@ private fun SettingsToggleSection(title: String, toggles: List<Preferences.Toggl
 
 @Composable
 private fun ToggleRow(label: String, value: Boolean, tag: String, onChange: (Boolean) -> Unit) {
-    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().testTag(tag)
+            .toggleable(value = value, role = Role.Switch, onValueChange = onChange),
+    ) {
         Text(label, modifier = Modifier.weight(1f))
-        Switch(checked = value, onCheckedChange = onChange, modifier = Modifier.testTag(tag))
+        Switch(checked = value, onCheckedChange = null)
     }
 }
 
@@ -768,14 +792,14 @@ private fun PartnerPortal(model: PartnerModel) {
             .testTag("partner-portal"),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Partner portal", style = MaterialTheme.typography.headlineMedium)
+        Text("Partner portal", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
         when (val phase = model.phase) {
             is PartnerPhase.Loading ->
                 CircularProgressIndicator(modifier = Modifier.testTag("partner-loading"))
             is PartnerPhase.Pending ->
                 // P-2: pending approval shows nothing else.
                 Column(modifier = Modifier.testTag("partner-pending"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Awaiting approval", style = MaterialTheme.typography.titleMedium)
+                    Text("Awaiting approval", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
                     Text("Your organization’s account is pending review. We’ll email you when it’s approved.")
                 }
             is PartnerPhase.Failed ->
@@ -813,7 +837,7 @@ private fun PartnerContent(model: PartnerModel, snapshot: PartnerSnapshot) {
     // Our People rollup — figures or the suppression notice (EM-3).
     snapshot.people?.let { people ->
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Our people", style = MaterialTheme.typography.titleMedium)
+            Text("Our people", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
             val notice = people.suppressionNotice
             if (notice != null) {
                 Text(notice, modifier = Modifier.testTag("partner-suppressed"))
@@ -826,26 +850,38 @@ private fun PartnerContent(model: PartnerModel, snapshot: PartnerSnapshot) {
     // Spend totals (P-12).
     if (snapshot.spend.isNotEmpty()) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("Spend", style = MaterialTheme.typography.titleMedium)
+            Text("Spend", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
             snapshot.spend.forEach { Text("${it.category}: ${it.amountLabel}", style = MaterialTheme.typography.bodySmall) }
         }
     }
 
     // Users — admin can invite/remove inline; a viewer sees the list read-only (§7.2).
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("Team", style = MaterialTheme.typography.titleMedium)
+        Text("Team", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
         snapshot.users.forEach { user ->
-            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("${user.name} · ${user.role}", modifier = Modifier.weight(1f))
                 if (model.role.canManageUsers) {
-                    Button(onClick = { model.removeUser(user.id) }) { Text("Remove") }
+                    Button(
+                        onClick = { model.removeUser(user.id) },
+                        modifier = Modifier.semantics { contentDescription = "Remove ${user.name}" },
+                    ) { Text("Remove") }
                 }
             }
         }
         if (model.role.canManageUsers) {
-            Button(onClick = { model.inviteUser("new@acme.com", PartnerRole.VIEWER) }, modifier = Modifier.testTag("partner-invite")) {
-                Text("Invite user")
-            }
+            var inviteEmail by rememberSaveable { mutableStateOf("") }
+            OutlinedTextField(
+                value = inviteEmail, onValueChange = { inviteEmail = it },
+                label = { Text("Invite a viewer by email") }, singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                modifier = Modifier.fillMaxWidth().testTag("partner-invite-email"),
+            )
+            Button(
+                onClick = { model.inviteUser(inviteEmail.trim(), PartnerRole.VIEWER); inviteEmail = "" },
+                enabled = isPlausibleEmail(inviteEmail),
+                modifier = Modifier.testTag("partner-invite"),
+            ) { Text("Invite user") }
         } else {
             Text("Read-only access", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("partner-readonly"))
         }

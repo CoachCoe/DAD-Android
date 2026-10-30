@@ -42,6 +42,13 @@ class EventsFlowTest {
         }
     }
 
+    @Test fun eachEventShowsItsStartDateAndTime() {
+        launch().use {
+            compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("event-start-e1")).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("event-start-e1").assertIsDisplayed()
+        }
+    }
+
     @Test fun reserveShowsInlineConfirmation() {
         launch().use {
             compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("reserve-e1")).fetchSemanticsNodes().isNotEmpty() }

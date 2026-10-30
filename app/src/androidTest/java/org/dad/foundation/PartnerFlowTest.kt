@@ -2,10 +2,16 @@ package org.dad.foundation
 
 import android.content.Intent
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextClearance
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Rule
@@ -37,6 +43,19 @@ class PartnerFlowTest {
             compose.onNodeWithTag("partner-verified-line").performScrollTo().assertIsDisplayed()
             // Admin can manage users.
             compose.onNodeWithTag("partner-invite").performScrollTo().assertIsDisplayed()
+        }
+    }
+
+    @Test fun inviteNeedsATypedValidEmailAndAddsTheUser() {
+        launch("preview_partner").use {
+            compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("partner-portal")).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("partner-invite").performScrollTo().assertIsNotEnabled()
+            compose.onNodeWithTag("partner-invite-email").performScrollTo().performTextInput("not-an-email")
+            compose.onNodeWithTag("partner-invite").performScrollTo().assertIsNotEnabled()
+            compose.onNodeWithTag("partner-invite-email").performTextClearance()
+            compose.onNodeWithTag("partner-invite-email").performTextInput("new.person@acme.com")
+            compose.onNodeWithTag("partner-invite").performScrollTo().assertIsEnabled().performClick()
+            compose.waitUntil(5_000) { compose.onAllNodes(hasText("new.person@acme.com · VIEWER")).fetchSemanticsNodes().isNotEmpty() }
         }
     }
 

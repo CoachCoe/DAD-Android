@@ -2,6 +2,10 @@ package org.dad.foundation
 
 import android.content.Intent
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -43,14 +47,14 @@ class NetworkBadgesFlowTest {
     @Test fun badgeGridRendersEarnedAndLockedStates() {
         launch().use {
             compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("badge-summary")).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("badge-summary").assertIsDisplayed()
+            compose.onNodeWithTag("badge-summary").performScrollTo().assertIsDisplayed()
             // An earned badge (Founding Donor) and a locked badge (Legacy) both render — state is
             // carried in the tile tag + the a11y label, not colour alone (B-1). The badge grid is a
             // non-lazy Column so every tile composes; FOUNDING_DONOR is in the viewport, while LEGACY
             // (the 24th tile) is scrolled off-screen, so it is asserted present (assertExists) rather
             // than displayed — both prove the tile is in the tree with its locked state in text.
             compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("badge-earned-FOUNDING_DONOR")).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("badge-earned-FOUNDING_DONOR").assertIsDisplayed()
+            compose.onNodeWithTag("badge-earned-FOUNDING_DONOR").performScrollTo().assertIsDisplayed()
             compose.onNodeWithTag("badge-locked-LEGACY").assertExists()
         }
     }
@@ -60,11 +64,14 @@ class NetworkBadgesFlowTest {
             compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("network-home")).fetchSemanticsNodes().isNotEmpty() }
             // Starts anonymous: the opt-in button is shown, no link yet.
             compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("sharing-optin")).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("sharing-optin").assertIsDisplayed()
+            // No name typed yet: opting in is disabled.
+            compose.onNodeWithTag("sharing-optin").performScrollTo().assertIsNotEnabled()
+            compose.onNodeWithTag("sharing-name").performScrollTo().performTextInput("Alex C.")
+            compose.onNodeWithTag("sharing-optin").performScrollTo().assertIsEnabled()
             // Opt in — inline, deterministic (no dialog): the share link appears.
             compose.onNodeWithTag("sharing-optin").performClick()
             compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("sharing-link")).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("sharing-link").assertIsDisplayed()
+            compose.onNodeWithTag("sharing-link").performScrollTo().assertIsDisplayed()
         }
     }
 }

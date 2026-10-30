@@ -6,6 +6,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Rule
@@ -46,9 +47,9 @@ class ImpactFlowTest {
             compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("ranking-national")).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("ranking-national").assertIsDisplayed()
             // Opt out — inline, deterministic (no dialog).
-            compose.onNodeWithTag("ranking-optout").performClick()
+            compose.onNodeWithTag("ranking-optout").performScrollTo().performClick()
             compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("ranking-optedout")).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("ranking-optedout").assertIsDisplayed()
+            compose.onNodeWithTag("ranking-optedout").performScrollTo().assertIsDisplayed()
         }
     }
 }

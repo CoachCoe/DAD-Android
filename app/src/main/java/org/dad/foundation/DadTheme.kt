@@ -18,6 +18,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.toColorInt
@@ -41,6 +43,9 @@ object DadTheme {
     fun space(step: String): Dp = (DADTokens.space[step] ?: 0.0).dp
     fun radius(name: String): Dp = (DADTokens.radius[name] ?: 0.0).dp
 }
+
+/** Marks a title for TalkBack heading navigation. */
+fun Modifier.dadHeading(): Modifier = semantics { heading() }
 
 /** Primary call-to-action. 48dp minimum target, brand-on-paper with readable contrast. */
 @Composable
