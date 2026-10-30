@@ -5,13 +5,21 @@ apps were selected on 18 October 2026. The session, transport, and deep-link fou
 is production-grade. The product screens (giving, impact, network and badges, events,
 settings, partner portal) are built against service seams and are reachable today only
 through DEBUG preview launch extras (`preview_giving`, `preview_events`, and so on);
-wiring them to the generated client is the remaining integration work. `WireAPI` binds only
-profile, claim, refresh, and logout today.
+wiring them to the generated client is the remaining integration work (phased; Phase 1 below is done).
 
-Account deletion: the Settings screen, typed confirmation gate, and local-session wipe are
-built, but the real-session `SettingsService.deleteAccount()` is not wired. Only the
-preview conformer exists and it does nothing, so the app does not yet call
-`POST /donor/me/delete`. Binding `deleteAccount` is required before a Play release.
+**Wired against the API (Phase 1):** donor phone + SMS sign-in (`beginPhoneSignIn`/`finishPhoneSignIn`,
+existing accounts only), claim-link sign-in, profile read, settings load/save (`savePreferences`),
+refresh, logout and real account deletion. Authenticated calls go through `ProductClient.perform` ->
+`AccountSession.authorized` (single-flight refresh, one bounded 401 retry, epoch-guarded); sign-in
+installs credentials through `AccountSession.establish` so the session owns the await. Settings is
+reachable from the donor shell; sign-out, deletion and a revoked session return to sign-in. Passkey,
+OIDC, email signup/password and partner sign-in are not wired (partner shows an honest notice). A
+release build with no `dadApiOrigin` shows a "not configured" notice and never serves synthetic data.
+
+Account deletion calls `POST /donor/me/delete` first and wipes local state (Keystore credentials and
+attribution) only on success; a 409 (active monthly gift or open checkout) is explained and nothing is
+wiped. Disclose in the Play Data safety "account deletion" answers that personal data is deleted while
+required gift/receipt records are retained.
 
 ## Build and test
 
@@ -26,7 +34,7 @@ node scripts/check-foundation.mjs
 ```
 
 Open this folder in Android Studio and run the app on Android 8/API 26 or newer.
-By default it uses a labeled synthetic account through the session API. Android
+By default a debug build uses a labeled synthetic account through the session API (`preview_signed_out` starts it signed out; code 123456 signs in). The `stub_backend` extra runs the REAL sign-in, session and settings code on a scripted in-process transport (debug source set only) for the instrumentation tests. Android
 instrumentation tests cover the Compose journeys and actual Keystore storage:
 `./gradlew :app:connectedDebugAndroidTest` with a running emulator. CI runs the same
 checks on API 35, and lint treats warnings as errors. AGP 9.4 itself emits Gradle
@@ -74,9 +82,8 @@ DAD-Main `assetlinks.json`, plus an HTTPS VIEW intent filter with the verified
 host. The release build ships application ID `org.dad.foundation`; the debug
 build uses `org.dad.foundation.debug` so both install side by side. Camera, push, and
 Wallet ports are defined; provider configuration, permission timing, final screens, and
-real-device acceptance follow the PRD. Phone, passkey, and OIDC sign-in operations are in
-the generated client (contract 2.3.0), but the app has no sign-in screens or `WireAPI`
-bindings for them yet; a session is established only by a claim link. No permission is requested on
+real-device acceptance follow the PRD. Phone sign-in is wired (see above); passkey and OIDC
+sign-in operations are in the generated client (contract 2.3.0) but have no screens yet. No permission is requested on
 startup, analytics are not enabled, and no staging/production service is contacted by
 the synthetic preview.
 
