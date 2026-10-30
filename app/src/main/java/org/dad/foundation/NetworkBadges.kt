@@ -120,6 +120,9 @@ data class BadgeGrid(
 
 // MARK: - Sharing visibility (N opt-in / A-5)
 
+/** Longest public name the opt-in field accepts (first name and last initial needs far less). */
+const val MAX_PUBLIC_NAME = 40
+
 /**
  * The donor's public sharing state. A null [publicName] means the donor has NOT opted into being
  * named — they appear anonymously in others' networks, and have no referral link yet. Choosing a

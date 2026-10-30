@@ -203,4 +203,13 @@ class NetworkBadgesTest {
         assertFalse(model.snapshot!!.sharing.isPublic)
         assertEquals(NetworkBadgesPhase.Ready, model.phase)
     }
+
+    @Test fun failedOptInKeepsThePageAndShowsAnInlineError() = runTest {
+        val model = NetworkBadgesModel(FakeService(failName = true))
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        model.choosePublicName("Alex C."); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(NetworkBadgesPhase.Ready, model.phase)
+        assertFalse(model.snapshot!!.sharing.isPublic)
+        assertTrue(model.actionError != null)
+    }
 }

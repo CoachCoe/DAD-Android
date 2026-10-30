@@ -8,6 +8,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -97,13 +98,14 @@ class EventsTest {
         var failLoad: Boolean = false,
         var reserveOutcome: ReservationOutcome = ReservationOutcome.RESERVED,
     ) : EventsService {
+        var reserveCalls = 0
         val base = DonorEvent("e1", "s", "T", "volunteer", "V", "Austin", Date(1), Date(2), 50, 5, ReservationStatus.NONE)
         override suspend fun events(): List<DonorEvent> {
             if (failLoad) throw AccountFailure.SignedOut
             return listOf(base)
         }
         override suspend fun event(id: String) = base.copy(status = ReservationStatus.RESERVED, spotsLeft = 4)
-        override suspend fun reserve(eventId: String) = reserveOutcome
+        override suspend fun reserve(eventId: String): ReservationOutcome { reserveCalls++; return reserveOutcome }
         override suspend fun cancel(eventId: String) {}
         override suspend fun checkIn(code: String) = CheckInResultValue("e1", checkedIn = true, alreadyCheckedIn = false)
     }
@@ -127,6 +129,17 @@ class EventsTest {
         model.reserve("e1"); dispatcher.scheduler.advanceUntilIdle()
         assertEquals(ReservationOutcome.WAITLISTED, model.lastOutcome)
         assertEquals(ReservationStatus.RESERVED, model.events.first().status) // refreshed in place
+    }
+
+    @Test fun doubleTappedReserveBooksOnce() = runTest {
+        val service = FakeService()
+        val model = EventsModel(service)
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        model.reserve("e1")
+        model.reserve("e1")
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(1, service.reserveCalls)
+        assertNull(model.actionError)
     }
 
     // --- CheckInModel window gate ---

@@ -53,6 +53,7 @@ class EventsModel(private val service: EventsService) : ViewModel() {
     /** A transient action error (reserve/cancel 409 etc.) shown inline without losing the list. */
     var actionError: String? by mutableStateOf(null)
         private set
+    private val inFlight = mutableSetOf<String>()
 
     fun load() {
         phase = EventsPhase.Loading
@@ -68,31 +69,30 @@ class EventsModel(private val service: EventsService) : ViewModel() {
         }
     }
 
-    fun reserve(eventId: String) {
-        actionError = null
-        viewModelScope.launch {
-            try {
-                lastOutcome = service.reserve(eventId)
-                refresh(eventId)
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                actionError = message(error)
-            }
-        }
+    fun reserve(eventId: String) = perform(eventId) {
+        lastOutcome = service.reserve(eventId)
+        refresh(eventId)
     }
 
-    fun cancel(eventId: String) {
+    fun cancel(eventId: String) = perform(eventId) {
+        service.cancel(eventId)
+        lastOutcome = null
+        refresh(eventId)
+    }
+
+    /** Runs one reserve/cancel at a time per event so a double tap cannot book or cancel twice. */
+    private fun perform(eventId: String, action: suspend () -> Unit) {
+        if (!inFlight.add(eventId)) return
         actionError = null
         viewModelScope.launch {
             try {
-                service.cancel(eventId)
-                lastOutcome = null
-                refresh(eventId)
+                action()
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
                 actionError = message(error)
+            } finally {
+                inFlight.remove(eventId)
             }
         }
     }
@@ -100,7 +100,8 @@ class EventsModel(private val service: EventsService) : ViewModel() {
     fun clearOutcome() { lastOutcome = null }
 
     private suspend fun refresh(eventId: String) {
-        val updated = try { service.event(eventId) } catch (_: Exception) { return }
+        // The action already succeeded; a failed re-read just leaves the row as it was until the next load.
+        val updated = try { service.event(eventId) } catch (error: CancellationException) { throw error } catch (_: Exception) { return }
         events = events.map { if (it.id == eventId) updated else it }
     }
 

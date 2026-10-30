@@ -104,6 +104,11 @@ class EngagementTest {
         assertEquals("#4 in Austin", standing.cityLabel)
     }
 
+    @Test fun topPercentileNeverReadsZero() {
+        assertEquals("Top 1% nationally", RankingStanding(100, null, null).nationalLabel)
+        assertEquals("Top 1% nationally", RankingStanding(99, null, null).nationalLabel)
+    }
+
     // --- Today initiative (A-2): at most 4 headline metrics ---
     @Test fun headlineMetricsCappedAtFour() {
         val today = TodayInitiative("slug", "Title", "Summary", (1..6).map { ImpactMetric("m$it", "$it") })
@@ -121,6 +126,7 @@ class EngagementTest {
     private class FakeEngagementService(
         var optedIn: Boolean = true,
         var failLoad: Boolean = false,
+        var failToggle: Boolean = false,
     ) : EngagementService {
         private fun ranking() = if (optedIn) RankingStanding(92, "Austin", 4) else RankingStanding(null, null, null)
         override suspend fun snapshot(): EngagementSnapshot {
@@ -134,6 +140,7 @@ class EngagementTest {
             )
         }
         override suspend fun setRankingOptIn(optIn: Boolean): RankingStanding {
+            if (failToggle) throw AccountFailure.Unavailable
             optedIn = optIn
             return ranking()
         }
@@ -165,5 +172,14 @@ class EngagementTest {
         // Still Ready — the rest of the snapshot is intact.
         assertEquals(EngagementPhase.Ready, model.phase)
         assertEquals(12, model.snapshot?.streak?.current)
+    }
+
+    @Test fun failedToggleKeepsTheHomeAndShowsAnInlineError() = runTest {
+        val model = EngagementModel(FakeEngagementService(failToggle = true))
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        model.setRankingOptIn(false); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(EngagementPhase.Ready, model.phase)
+        assertFalse(model.snapshot!!.ranking.isOptedOut)
+        assertTrue(model.actionError != null)
     }
 }

@@ -58,6 +58,10 @@ class EngagementModel(
         private set
     var snapshot: EngagementSnapshot? by mutableStateOf(null)
         private set
+    /** A failed ranking toggle shows inline and leaves the loaded home on screen. */
+    var actionError: String? by mutableStateOf(null)
+        private set
+    private var togglingRanking = false
 
     fun load() {
         phase = EngagementPhase.Loading
@@ -75,15 +79,19 @@ class EngagementModel(
 
     /** Toggle rankings visibility (K-2); on success the snapshot's ranking is replaced in place. */
     fun setRankingOptIn(optIn: Boolean) {
-        val current = snapshot ?: return
+        if (snapshot == null || togglingRanking) return
+        togglingRanking = true
+        actionError = null
         viewModelScope.launch {
             try {
                 val ranking = service.setRankingOptIn(optIn)
-                snapshot = current.copy(ranking = ranking)
+                snapshot = snapshot?.copy(ranking = ranking)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                phase = EngagementPhase.Failed(message(error))
+                actionError = message(error)
+            } finally {
+                togglingRanking = false
             }
         }
     }

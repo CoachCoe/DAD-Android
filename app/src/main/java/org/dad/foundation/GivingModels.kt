@@ -111,6 +111,7 @@ class GivingModel(
      * failure when there is no subscription to change — the set-up-first case the UI gates on.
      */
     fun applySelection() {
+        if (phase == GivingPhase.Working) return
         val id = recurring.subscriptionIdOrNull ?: run {
             phase = GivingPhase.Failed("Set up a gift before changing the amount.")
             return
@@ -130,6 +131,7 @@ class GivingModel(
 
     /** Cancel at period end (G-8/G-9). Requires an active subscription with a known period end. */
     fun cancel() {
+        if (phase == GivingPhase.Working) return
         val active = recurring as? RecurringState.Active ?: run {
             phase = GivingPhase.Failed("There's no active gift to cancel.")
             return

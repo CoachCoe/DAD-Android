@@ -24,6 +24,15 @@ enum class PartnerRole {
     val canExport: Boolean get() = this == ADMIN
 }
 
+/** Thousands-grouped count ("12,400") to match the grouped money figures. */
+internal fun formatCount(value: Long): String = String.format(java.util.Locale.US, "%,d", value)
+
+/** A conservative shape check before an invite is sent; the server remains the authority. */
+fun isPlausibleEmail(value: String): Boolean {
+    val email = value.trim()
+    return email.length <= 254 && Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$").matches(email)
+}
+
 // MARK: - Verified figures (§7.3 — hidden, never estimated)
 
 /** A money figure shown ONLY when the server marks it verified; unverified is hidden (§7.3). */
@@ -33,7 +42,7 @@ data class VerifiedMoney(val amountMinor: Long, val verified: Boolean) {
 
 /** A count figure shown only when verified. */
 data class VerifiedCount(val value: Long, val verified: Boolean) {
-    val label: String? get() = if (verified) value.toString() else null
+    val label: String? get() = if (verified) formatCount(value) else null
 }
 
 // MARK: - Overview (P-10, §7.3)
@@ -122,7 +131,7 @@ data class PartnerMetric(val label: String, val value: Long, val unit: Unit) {
             }
         }
     }
-    val valueLabel: String get() = if (unit == Unit.USD_CENTS) formatMinorUsd(value) else value.toString()
+    val valueLabel: String get() = if (unit == Unit.USD_CENTS) formatMinorUsd(value) else formatCount(value)
 }
 
 // MARK: - Users (P-13 management)

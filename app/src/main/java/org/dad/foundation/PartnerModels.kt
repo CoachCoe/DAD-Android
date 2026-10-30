@@ -69,10 +69,10 @@ class PartnerModel(private val service: PartnerService) : ViewModel() {
                 val overview = service.overview()
                 snapshot = PartnerSnapshot(
                     overview = overview,
-                    initiatives = runCatching { service.initiatives() }.getOrDefault(emptyList()),
-                    spend = runCatching { service.spend() }.getOrDefault(emptyList()),
-                    people = runCatching { service.people() }.getOrNull(),
-                    users = runCatching { service.users() }.getOrDefault(emptyList()),
+                    initiatives = optional(emptyList()) { service.initiatives() },
+                    spend = optional(emptyList()) { service.spend() },
+                    people = optional(null) { service.people() },
+                    users = optional(emptyList()) { service.users() },
                 )
                 phase = PartnerPhase.Ready
             } catch (error: CancellationException) {
@@ -89,11 +89,13 @@ class PartnerModel(private val service: PartnerService) : ViewModel() {
      *  is a no-op that surfaces the gate rather than hitting the network. */
     fun inviteUser(email: String, role: PartnerRole) {
         if (!this.role.canManageUsers) { actionError = "Only an admin can invite users."; return }
+        if (!isPlausibleEmail(email)) { actionError = "Enter a valid email address."; return }
         actionError = null
         viewModelScope.launch {
             try {
                 service.inviteUser(email, role)
-                snapshot = snapshot?.copy(users = runCatching { service.users() }.getOrDefault(snapshot?.users ?: emptyList()))
+                val fallback = snapshot?.users ?: emptyList()
+                snapshot = snapshot?.copy(users = optional(fallback) { service.users() })
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -119,11 +121,27 @@ class PartnerModel(private val service: PartnerService) : ViewModel() {
 
     /** Register this device for partner push after sign-in (§7.5). Best-effort — never blocks. */
     fun registerPush(token: String) {
-        viewModelScope.launch { runCatching { service.registerPushDevice(token) } }
+        viewModelScope.launch { bestEffort { service.registerPushDevice(token) } }
     }
 
     fun unregisterPush() {
-        viewModelScope.launch { runCatching { service.unregisterPushDevice() } }
+        viewModelScope.launch { bestEffort { service.unregisterPushDevice() } }
+    }
+
+    /** A secondary read: a failure hides that section rather than the whole portal. Cancellation and
+     *  an ended session still propagate. */
+    private suspend fun <T> optional(fallback: T, read: suspend () -> T): T = try {
+        read()
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: AccountFailure.SignedOut) {
+        throw error
+    } catch (_: Exception) {
+        fallback
+    }
+
+    private suspend fun bestEffort(action: suspend () -> Unit) {
+        try { action() } catch (error: CancellationException) { throw error } catch (_: Exception) { }
     }
 
     private fun message(error: Exception): String = when (error) {

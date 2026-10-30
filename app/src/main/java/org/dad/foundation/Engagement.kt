@@ -124,8 +124,8 @@ data class RankingStanding(
 ) {
     val isOptedOut: Boolean get() = nationalPercentile == null && city == null && cityRank == null
 
-    /** "Top 8% nationally" (from the 92nd percentile), or null when opted out / unknown. */
-    val nationalLabel: String? get() = nationalPercentile?.let { "Top ${100 - it}% nationally" }
+    /** "Top 8% nationally" (from the 92nd percentile; never "Top 0%"), or null when opted out / unknown. */
+    val nationalLabel: String? get() = nationalPercentile?.let { "Top ${(100 - it).coerceAtLeast(1)}% nationally" }
 
     /** "#4 in Austin", or null when opted out / unknown. */
     val cityLabel: String? get() {

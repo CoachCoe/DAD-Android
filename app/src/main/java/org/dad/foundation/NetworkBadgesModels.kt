@@ -58,6 +58,10 @@ class NetworkBadgesModel(
         private set
     var snapshot: NetworkBadgesSnapshot? by mutableStateOf(null)
         private set
+    /** A failed opt-in shows inline and leaves the loaded page on screen. */
+    var actionError: String? by mutableStateOf(null)
+        private set
+    private var choosingName = false
 
     fun load() {
         phase = NetworkBadgesPhase.Loading
@@ -75,17 +79,20 @@ class NetworkBadgesModel(
 
     /** Opt into a public name (N opt-in); on success the snapshot's sharing is replaced in place. */
     fun choosePublicName(name: String) {
-        val current = snapshot ?: return
         val trimmed = name.trim()
-        if (trimmed.isEmpty()) return
+        if (snapshot == null || trimmed.isEmpty() || choosingName) return
+        choosingName = true
+        actionError = null
         viewModelScope.launch {
             try {
                 val sharing = service.choosePublicName(trimmed)
-                snapshot = current.copy(sharing = sharing)
+                snapshot = snapshot?.copy(sharing = sharing)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                phase = NetworkBadgesPhase.Failed(message(error))
+                actionError = message(error)
+            } finally {
+                choosingName = false
             }
         }
     }

@@ -10,6 +10,8 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 // Settings view model + the service seam. The model owns load/ready/failed state, the
 // toggle-and-save path (optimistic version bump), and the delete-account flow (confirm gate ->
@@ -44,6 +46,8 @@ class SettingsModel(private val service: SettingsService) : ViewModel() {
         private set
     var actionError: String? by mutableStateOf(null)
         private set
+    private val saveLock = Mutex()
+    private var leaving = false
 
     fun load() {
         phase = SettingsPhase.Loading
@@ -59,18 +63,22 @@ class SettingsModel(private val service: SettingsService) : ViewModel() {
         }
     }
 
-    /** Flip one preference toggle and persist. The snapshot is replaced in place on success so the
-     *  version advances; on failure the old snapshot stays and the error surfaces inline. */
+    /** Flip one preference toggle and persist. Saves run one at a time against the latest snapshot,
+     *  so rapid taps cannot overwrite each other with a stale version. On failure the old snapshot
+     *  stays and the error surfaces inline. */
     fun toggle(key: String, value: Boolean) {
-        val current = snapshot ?: return
+        if (snapshot == null) return
         actionError = null
         viewModelScope.launch {
-            try {
-                snapshot = service.savePreferences(current.preferences.with(key, value))
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                actionError = message(error)
+            saveLock.withLock {
+                val current = snapshot ?: return@withLock
+                try {
+                    snapshot = service.savePreferences(current.preferences.with(key, value))
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    actionError = message(error)
+                }
             }
         }
     }
@@ -78,21 +86,28 @@ class SettingsModel(private val service: SettingsService) : ViewModel() {
     /** Delete the account only when the confirm gate is satisfied, then wipe the local session. */
     fun deleteAccount(gate: DeleteAccountGate) {
         if (!gate.isConfirmed) { actionError = "Type ${DeleteAccountGate.CONFIRM_WORD} to confirm."; return }
+        if (leaving) return
+        leaving = true
         actionError = null
         viewModelScope.launch {
             try {
                 service.deleteAccount()
-                service.signOut()
-                signedOut = true
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
+                leaving = false
                 actionError = message(error)
+                return@launch
             }
+            // The account is gone; a failed remote revocation must not strand the donor in settings.
+            try { service.signOut() } catch (error: CancellationException) { throw error } catch (_: Exception) { }
+            signedOut = true
         }
     }
 
     fun signOut() {
+        if (leaving) return
+        leaving = true
         viewModelScope.launch {
             try {
                 service.signOut()
@@ -100,6 +115,7 @@ class SettingsModel(private val service: SettingsService) : ViewModel() {
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
+                leaving = false
                 actionError = message(error)
             }
         }
