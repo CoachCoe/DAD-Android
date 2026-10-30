@@ -123,6 +123,9 @@ class SettingsModel(private val service: SettingsService) : ViewModel() {
 
     private fun message(error: Exception): String = when (error) {
         is AccountFailure.SignedOut -> "Please sign in again."
+        is AccountFailure.RateLimited -> "Too many attempts. Please wait a moment and try again."
+        is AccountFailure.DeletionBlocked ->
+            "We can’t delete your account while a monthly gift is active or a checkout is open. Cancel your monthly gift first, then try again."
         else -> "Something went wrong. Please try again."
     }
 
