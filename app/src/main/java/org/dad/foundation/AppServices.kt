@@ -1,7 +1,36 @@
 package org.dad.foundation
 
+/**
+ * Optional sign-in methods that need owner-supplied configuration and a platform provider. Both
+ * providers are null until a Credential Manager implementation is linked, so [capabilities] is
+ * [SignInCapabilities.NONE] and the sign-in screen says "Not available yet".
+ */
+class ExternalSignInDeps(
+    val capabilities: SignInCapabilities = SignInCapabilities.NONE,
+    val oidc: OidcSignInService = UnconfiguredExternalSignIn,
+    val passkey: PasskeySignInService = UnconfiguredExternalSignIn,
+    val googleTokens: GoogleIdTokenProvider? = null,
+    val authenticator: PasskeyAuthenticator? = null,
+)
+
+/** The unauthenticated flows the sign-in stack drives. */
+class AuthServices(
+    val phone: SignInService,
+    val signup: SignupService,
+    val password: PasswordSignInService,
+    val external: ExternalSignInDeps,
+)
+
 /** What the composition root hands the UI: the session plus the real (or, in DEBUG only, preview) services on it. */
-class AppServices(val session: AccountSession, val signIn: SignInService, val settings: SettingsService?)
+class AppServices(
+    val session: AccountSession,
+    val signIn: SignInService,
+    val settings: SettingsService?,
+    val signup: SignupService = UnconfiguredCredentialAuth,
+    val passwordSignIn: PasswordSignInService = UnconfiguredCredentialAuth,
+    val passwordSettings: PasswordSettingsService? = null,
+    val external: ExternalSignInDeps = ExternalSignInDeps(),
+)
 
 /** DEBUG launch switches. Always all-false in a release build. */
 data class LaunchOptions(

@@ -14,6 +14,8 @@ const allowed = new Set([
   // auth / session management (Phase 1 auth shell)
   "login", "logoutAll", "sessions", "revokeSession", "revokeOtherSessions",
   "beginPhoneSignIn", "finishPhoneSignIn", "oidcSignIn",
+  // P1b: email signup + password sign-in + set/change password (contract 2.4.0)
+  "postDonorSignup", "postDonorPasswordSignIn", "postDonorMePassword",
   "beginDonorPasskeyRegister", "finishDonorPasskeyRegister",
   "beginDonorPasskeySignIn", "finishDonorPasskeySignIn", "donorPasskeys", "deleteDonorPasskey",
   "requestEmailChange", "confirmEmailChange",
