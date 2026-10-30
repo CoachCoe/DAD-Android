@@ -22,4 +22,16 @@ class KeystoreStoreTest {
             assertNull(store.load())
         } finally { store.clear() }
     }
+
+    @Test fun corruptedSessionFileLoadsAsSignedOutAndIsRemoved() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val store = KeystoreCredentialStore(context)
+        val file = File(context.noBackupFilesDir, "donor-session.enc")
+        try {
+            store.save(Credentials("synthetic-access-secret", "synthetic-refresh-secret", 1234))
+            file.writeBytes(ByteArray(64) { it.toByte() })
+            assertNull(store.load())
+            assertFalse(file.exists())
+        } finally { store.clear() }
+    }
 }
