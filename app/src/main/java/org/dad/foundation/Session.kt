@@ -23,7 +23,9 @@ sealed class AccountFailure : java.io.IOException() {
     data object DeletionBlocked : AccountFailure()
     /** 422 `CURRENT_PASSWORD_INCORRECT` on set-password: a wrong typed value, NOT a bad session. Never ends the session. */
     data object PasswordIncorrect : AccountFailure()
-    /** 403 on a giving command: giving is not available for this account. */
+    /** 404: the item is gone, or hidden from this donor (an invite-only event they are not invited to). */
+    data object NotFound : AccountFailure()
+    /** 403: the account is not allowed this command (giving unavailable; not eligible for an event). */
     data object Forbidden : AccountFailure()
     /** 409 on a giving command: billing changed (or a checkout is open) since the screen last read it; re-read, then retry. */
     data object Conflict : AccountFailure()
