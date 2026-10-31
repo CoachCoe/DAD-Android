@@ -106,7 +106,7 @@ class EngagementTest {
     }
 
     @Test fun optedOutHidesFiguresEvenIfTheServerSentThem() {
-        val standing = RankingStanding(92, "Austin", 4, optedOut = true)
+        val standing = RankingStanding(2, "Austin", 4, optedOut = true)
         assertTrue(standing.isOptedOut)
         assertNull(standing.nationalLabel)
         assertNull(standing.cityLabel)
@@ -115,24 +115,28 @@ class EngagementTest {
     @Test fun dashboardFlagDrivesOptOutNotMissingFigures() {
         val unranked = RankingStanding.fromDashboard(null, null, null, rankingsOptedOut = false)
         assertFalse(unranked.isOptedOut) // opted in but not yet ranked
-        val out = RankingStanding.fromDashboard(92, "Austin", 4, rankingsOptedOut = true)
+        val out = RankingStanding.fromDashboard(2, "Austin", 4, rankingsOptedOut = true)
         assertTrue(out.isOptedOut) // hides figures even if the server sent them
         assertNull(out.nationalLabel)
         assertNull(out.cityLabel)
-        val ranked = RankingStanding.fromDashboard(92, "Austin", 4, rankingsOptedOut = false)
+        val ranked = RankingStanding.fromDashboard(2, "Austin", 4, rankingsOptedOut = false)
         assertEquals("#4 in Austin", ranked.cityLabel)
     }
 
     @Test fun rankingLabelsWhenOptedIn() {
-        val standing = RankingStanding(nationalPercentile = 92, city = "Austin", cityRank = 4)
+        val standing = RankingStanding(nationalPercentile = 2, city = "Austin", cityRank = 4)
         assertFalse(standing.isOptedOut)
-        assertEquals("Top 8% nationally", standing.nationalLabel)
+        // The server value is already the top bucket: 2 reads "Top 2%", not "Top 98%".
+        assertEquals("Top 2% nationally", standing.nationalLabel)
+        assertEquals("Top 1% nationally", RankingStanding(1, null, null).nationalLabel)
+        assertEquals("Top 50% nationally", RankingStanding(50, null, null).nationalLabel)
+        assertEquals("Top 98% nationally", RankingStanding(98, null, null).nationalLabel)
         assertEquals("#4 in Austin", standing.cityLabel)
     }
 
     @Test fun topPercentileNeverReadsZero() {
-        assertEquals("Top 1% nationally", RankingStanding(100, null, null).nationalLabel)
-        assertEquals("Top 1% nationally", RankingStanding(99, null, null).nationalLabel)
+        assertEquals("Top 1% nationally", RankingStanding(0, null, null).nationalLabel)
+        assertEquals("Top 1% nationally", RankingStanding(-3, null, null).nationalLabel)
     }
 
     // --- Today initiative (A-2): at most 4 headline metrics ---
