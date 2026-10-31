@@ -64,7 +64,8 @@ internal fun HomeCard(tag: String, modifier: Modifier = Modifier, content: @Comp
 /** The dashboard cards, today's initiative and the way into gift history. */
 @Composable
 fun DonorHome(
-    model: DashboardModel, giving: GivingModel? = null, onOpenGift: () -> Unit = {}, onOpenHistory: () -> Unit, onSignedOut: () -> Unit,
+    model: DashboardModel, giving: GivingModel? = null, onOpenGift: () -> Unit = {}, onOpenEvents: (() -> Unit)? = null,
+    onOpenHistory: () -> Unit, onSignedOut: () -> Unit,
 ) {
     LaunchedEffect(Unit) { model.load(); giving?.load() }
     LaunchedEffect(model.signedOut) { if (model.signedOut) onSignedOut() }
@@ -87,6 +88,7 @@ fun DonorHome(
         }
         giving?.let { GiftSummaryCard(it, onManage = onOpenGift) }
         InitiativeCard(model.initiative, onRetry = { model.load() })
+        if (onOpenEvents != null) OutlinedButton(onClick = onOpenEvents, modifier = Modifier.heightIn(min = 48.dp).testTag("open-events")) { Text("Events & volunteering") }
         OutlinedButton(onClick = onOpenHistory, modifier = Modifier.heightIn(min = 48.dp).testTag("open-history")) { Text("Gift history") }
     }
 }

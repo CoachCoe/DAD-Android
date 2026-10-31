@@ -32,6 +32,7 @@ class AppServices(
     val external: ExternalSignInDeps = ExternalSignInDeps(),
     val dashboard: DashboardService? = null,
     val giving: GivingKit? = null,
+    val events: EventsService? = null,
 )
 
 /** DEBUG launch switches. Always all-false in a release build. */
@@ -48,6 +49,8 @@ data class LaunchOptions(
     val stubGift: StubGift = StubGift.NONE,
     /** Stub backend only (screenshot and UI-test aid): open the gift screen straight from the donor home. */
     val stubOpenGift: Boolean = false,
+    /** Stub backend only: what the scripted events routes answer. */
+    val stubEvents: StubEventsScenario = StubEventsScenario.STANDARD,
 )
 
 /** What the DEBUG stub backend answers for the donor-home reads. */
@@ -55,3 +58,6 @@ enum class StubDashboard { POPULATED, EMPTY, FAIL_FIRST, UNRANKED, SLOW }
 
 /** The monthly gift the DEBUG stub backend starts with. */
 enum class StubGift { NONE, ACTIVE, ACTIVE_FAIL_FIRST }
+
+/** What the DEBUG stub backend does for the events routes. */
+enum class StubEventsScenario { STANDARD, INVITED, FAIL_FIRST, NOT_ELIGIBLE }
