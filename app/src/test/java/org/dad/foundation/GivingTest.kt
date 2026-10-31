@@ -171,4 +171,13 @@ class GivingTest {
         assertEquals(1, service.cancelCalls)
         assertTrue(model.recurring is RecurringState.Ending)
     }
+
+    @Test fun giftHeadingCoversEveryState() {
+        val d = Date(0)
+        assertEquals("Your monthly gift", giftHeading(false, RecurringState.None))
+        assertEquals("Start a monthly gift", giftHeading(true, RecurringState.None))
+        assertEquals("Your gift is on its way", giftHeading(true, RecurringState.Preparing))
+        assertEquals("Your monthly gift", giftHeading(true, RecurringState.Active("s", 3000, d)))
+        assertEquals("Your gift is ending", giftHeading(true, RecurringState.Ending("s", 3000, d, d)))
+    }
 }

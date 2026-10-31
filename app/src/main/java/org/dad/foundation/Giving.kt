@@ -181,3 +181,15 @@ object CancelCopy {
         return "Your gift stays active until $date. After that it won't renew and your streak ends."
     }
 }
+
+fun giftHeading(hasLoaded: Boolean, recurring: RecurringState): String =
+    if (!hasLoaded) {
+        "Your monthly gift"
+    } else {
+        when (recurring) {
+            is RecurringState.None -> "Start a monthly gift"
+            is RecurringState.Preparing -> "Your gift is on its way"
+            is RecurringState.Active -> "Your monthly gift"
+            is RecurringState.Ending -> "Your gift is ending"
+        }
+    }

@@ -131,7 +131,7 @@ fun GiftScreen(model: GivingModel, stubComplete: ((HostedHandoff.Purpose) -> Uni
     ) {
         if (onClose != null) OutlinedButton(onClick = onClose, modifier = Modifier.heightIn(min = 48.dp).testTag("gift-close")) { Text("Close") }
         Text(
-            if (model.hasLoaded && model.recurring == RecurringState.None) "Your gift" else "Set your gift",
+            giftHeading(model.hasLoaded, model.recurring),
             style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading(),
         )
         if (!model.hasLoaded) LoadingOrFailed(model) else Loaded(model, confirmingCancel) { confirmingCancel = it }
