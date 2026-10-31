@@ -57,6 +57,10 @@ class WireCredentialAuthTest {
         assertEquals(AccountFailure.Unavailable, failure { auth(403).first.requestSignup(form) })
     }
 
+    @Test fun signupIngressRateLimitWithAnEmptyBodyAndNoRetryAfterIsRateLimited() = runTest {
+        assertEquals(AccountFailure.RateLimited, failure { auth(429, "").first.requestSignup(form) })
+    }
+
     // MARK: password sign-in
 
     @Test fun passwordSignInSendsDeviceNameAndAndroidPlatformAndReturnsCredentials() = runTest {

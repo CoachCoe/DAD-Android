@@ -13,8 +13,9 @@ import retrofit2.http.Body
 import retrofit2.http.POST
 
 /**
- * Signup answers 200 `{"sent":true}` where earlier contract revisions documented 202 `{message}`; the
- * outcome is the same (a link was emailed), so the body is deliberately NOT decoded: any 2xx is success.
+ * Contract 2.5.0 types the signup answer as `SignupSent` (200 `{"sent":true}`), but the outcome is only
+ * "a link was emailed": the body is deliberately NOT decoded, so any 2xx is success even with an empty or
+ * undecodable body (a typed Retrofit decode would surface Gson/EOF errors for a request that succeeded).
  */
 private interface SignupEndpoint {
     @POST("donor/signup")
