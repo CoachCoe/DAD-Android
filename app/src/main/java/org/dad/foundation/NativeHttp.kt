@@ -71,10 +71,15 @@ internal fun <T> Response<T>.problem(): Pair<String?, String?> = try {
 internal fun <T> Response<T>.requireBody(conflict: AccountFailure = AccountFailure.Unavailable): T =
     checked(conflict).body() ?: throw AccountFailure.InvalidResponse
 
-/** A malformed 200 body is an invalid response, not an unhandled parser crash. */
+/**
+ * A malformed 200 body is an invalid response, not an unhandled parser crash. An empty body surfaces from
+ * Gson as an [java.io.EOFException]; the transport has already read the whole body by then (see
+ * [nativeRetrofit]), so it is a decode failure and never a dropped connection.
+ */
 internal inline fun <T> decoding(block: () -> T): T =
     try { block() } catch (_: JsonParseException) { throw AccountFailure.InvalidResponse }
     catch (_: MalformedJsonException) { throw AccountFailure.InvalidResponse }
+    catch (_: java.io.EOFException) { throw AccountFailure.InvalidResponse }
 
 internal fun nativeCredentials(accessToken: String?, refreshToken: String?, expiresIn: Int): Credentials {
     if (accessToken.isNullOrBlank() || refreshToken.isNullOrBlank() || expiresIn <= 0) throw AccountFailure.InvalidResponse
