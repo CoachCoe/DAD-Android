@@ -45,7 +45,14 @@ class DashboardFlowTest {
 
     private fun openHistory() {
         waitFor("open-history")
-        compose.onNodeWithTag("open-history").performScrollTo().performClick()
+        // The dashboard can still be settling when the button first appears, swallowing the click: retry the
+        // click until the history screen is actually on screen rather than assuming one click landed.
+        compose.waitUntil(30_000) {
+            if (exists("history-screen")) return@waitUntil true
+            runCatching { compose.onNodeWithTag("open-history").performScrollTo().performClick() }
+            compose.waitForIdle()
+            exists("history-screen")
+        }
     }
 
     @Test fun signedInDashboardRendersStubbedServerData() {
