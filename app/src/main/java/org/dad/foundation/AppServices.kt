@@ -30,6 +30,7 @@ class AppServices(
     val passwordSignIn: PasswordSignInService = UnconfiguredCredentialAuth,
     val passwordSettings: PasswordSettingsService? = null,
     val external: ExternalSignInDeps = ExternalSignInDeps(),
+    val dashboard: DashboardService? = null,
 )
 
 /** DEBUG launch switches. Always all-false in a release build. */
@@ -38,4 +39,11 @@ data class LaunchOptions(
     val signedOut: Boolean = false,
     val stubBackend: Boolean = false,
     val stubDeleteBlocked: Boolean = false,
+    /** Stub backend only: start with a stored session so the signed-in donor home renders at once. */
+    val stubSignedIn: Boolean = false,
+    /** Stub backend only: what the scripted donor-home reads answer. */
+    val stubDashboard: StubDashboard = StubDashboard.POPULATED,
 )
+
+/** What the DEBUG stub backend answers for the donor-home reads. */
+enum class StubDashboard { POPULATED, EMPTY, FAIL_FIRST, UNRANKED }

@@ -134,11 +134,15 @@ class AccountModel(
         private set
     var signIn: SignInService = UnconfiguredSignIn
         private set
-    var settings: SettingsService? = null
+    // Observable: a restored session composes the shell before the services are built, so the shell
+    // must recompose when they arrive (otherwise Settings and the donor home never appear).
+    var settings: SettingsService? by mutableStateOf(null)
         private set
     var auth: AuthServices = AuthServices(UnconfiguredSignIn, UnconfiguredCredentialAuth, UnconfiguredCredentialAuth, ExternalSignInDeps())
         private set
-    var passwordSettings: PasswordSettingsService? = null
+    var passwordSettings: PasswordSettingsService? by mutableStateOf(null)
+        private set
+    var dashboard: DashboardService? by mutableStateOf(null)
         private set
     private var loading = false
     private var pendingProof: String? = null
@@ -160,7 +164,7 @@ class AccountModel(
         try {
             withContext(io) { factory(CoroutineScope(viewModelScope.coroutineContext + io), options) }
                 .also {
-                    services = it; signIn = it.signIn; settings = it.settings; passwordSettings = it.passwordSettings
+                    services = it; signIn = it.signIn; settings = it.settings; passwordSettings = it.passwordSettings; dashboard = it.dashboard
                     auth = AuthServices(it.signIn, it.signup, it.passwordSignIn, it.external)
                 }
         } catch (cancelled: CancellationException) { throw cancelled }
@@ -288,6 +292,14 @@ class MainActivity : ComponentActivity() {
             signedOut = BuildConfig.DEBUG && intent.getBooleanExtra("preview_signed_out", false),
             stubBackend = BuildConfig.DEBUG && intent.getBooleanExtra("stub_backend", false),
             stubDeleteBlocked = BuildConfig.DEBUG && intent.getBooleanExtra("stub_delete_blocked", false),
+            stubSignedIn = BuildConfig.DEBUG && intent.getBooleanExtra("stub_signed_in", false),
+            stubDashboard = when {
+                !BuildConfig.DEBUG -> StubDashboard.POPULATED
+                intent.getBooleanExtra("stub_dashboard_empty", false) -> StubDashboard.EMPTY
+                intent.getBooleanExtra("stub_dashboard_fail_first", false) -> StubDashboard.FAIL_FIRST
+                intent.getBooleanExtra("stub_dashboard_unranked", false) -> StubDashboard.UNRANKED
+                else -> StubDashboard.POPULATED
+            },
         )
         val giving = BuildConfig.DEBUG && intent.getBooleanExtra("preview_giving", false)
         val impact = BuildConfig.DEBUG && intent.getBooleanExtra("preview_impact", false)
@@ -324,6 +336,7 @@ class MainActivity : ComponentActivity() {
                             signup = credentialAuth,
                             passwordSignIn = credentialAuth,
                             passwordSettings = WirePasswordSettings(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
+                            dashboard = WireDashboard(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
                             external = ExternalSignInDeps(
                                 // No Credential Manager provider is linked, so a configured ID alone never switches a method on.
                                 capabilities = SignInCapabilities.of(SignInConfig(BuildConfig.DAD_GOOGLE_WEB_CLIENT_ID, BuildConfig.DAD_PASSKEY_RP_ID)),
@@ -407,8 +420,17 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun DonorShell(model: AccountModel) {
     var inSettings by rememberSaveable { mutableStateOf(false) }
+    var inHistory by rememberSaveable { mutableStateOf(false) }
     val service = model.settings
-    if (inSettings && service != null) {
+    val dashboard = model.dashboard
+    if (inHistory && dashboard != null) {
+        BackHandler { inHistory = false }
+        GiftHistoryScreen(
+            viewModel(key = "history-${model.generation}", factory = GiftHistoryModel.factory(dashboard)),
+            onClose = { inHistory = false },
+            onSignedOut = { inHistory = false; model.onSignedOut() },
+        )
+    } else if (inSettings && service != null) {
         BackHandler { inSettings = false }
         SettingsHome(
             viewModel(key = "settings-${model.generation}", factory = SettingsModel.factory(service)),
@@ -419,14 +441,22 @@ private fun DonorShell(model: AccountModel) {
             },
         )
     } else {
-        DonorLanding(model, onSettings = if (service != null) ({ inSettings = true }) else null)
+        DonorLanding(model, onSettings = if (service != null) ({ inSettings = true }) else null) {
+            if (dashboard != null && model.state is AccountState.Ready) {
+                DonorHome(
+                    viewModel(key = "home-${model.generation}", factory = DashboardModel.factory(dashboard)),
+                    onOpenHistory = { inHistory = true },
+                    onSignedOut = { model.onSignedOut() },
+                )
+            }
+        }
     }
 }
 
 /** The signed-in donor landing. Carries the exact copy the app has shown since the preview
  * shell, so the role-aware root is a structural change, not a visible one. */
 @Composable
-private fun DonorLanding(model: AccountModel, onSettings: (() -> Unit)? = null) {
+private fun DonorLanding(model: AccountModel, onSettings: (() -> Unit)? = null, home: @Composable () -> Unit = {}) {
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.Center) {
         Text("DAD", style = MaterialTheme.typography.displayMedium, modifier = Modifier.dadHeading())
         Spacer(Modifier.height(16.dp))
@@ -453,6 +483,8 @@ private fun DonorLanding(model: AccountModel, onSettings: (() -> Unit)? = null) 
             Spacer(Modifier.height(20.dp))
             Button(onClick = onSettings, modifier = Modifier.testTag("open-settings")) { Text("Settings") }
         }
+        Spacer(Modifier.height(20.dp))
+        home()
         Spacer(Modifier.height(28.dp))
         if (BuildConfig.DAD_API_ORIGIN.isBlank()) Text("Preview · Sample account", style = MaterialTheme.typography.labelLarge)
     }
