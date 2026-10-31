@@ -58,8 +58,8 @@ configuration deprecation diagnostics; those upstream warnings are not suppresse
 
 ## Contract, sessions, and transport
 
-`foundation.lock.json` pins the mobile foundation release (currently 2.6.0, tag
-`mobile-foundation-v2.6.0`) and its manifest
+`foundation.lock.json` pins the mobile foundation release (currently 2.7.0, tag
+`mobile-foundation-v2.7.0`) and its manifest
 SHA-256. The vendored release is verified before code generation. The build invokes pinned
 OpenAPI Generator CLI 7.20.0 and generates Retrofit coroutine interfaces and Gson models
 for the operations allow-listed in `scripts/prepare-client.mjs`. No client is generated
