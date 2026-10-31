@@ -3,6 +3,7 @@ package org.dad.foundation
 import android.content.Intent
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -33,6 +34,10 @@ class StubBackendFlowTest {
     private fun waitFor(tag: String, timeout: Long = 15_000) =
         compose.waitUntil(timeout) { compose.onAllNodes(hasTestTag(tag)).fetchSemanticsNodes().isNotEmpty() }
 
+    /** Waits until the tagged control exists AND is enabled, so a click never lands on a still-disabled button. */
+    private fun waitEnabled(tag: String, timeout: Long = 15_000) =
+        compose.waitUntil(timeout) { compose.onAllNodes(hasTestTag(tag).and(isEnabled())).fetchSemanticsNodes().isNotEmpty() }
+
     private fun signIn(code: String) {
         waitFor("role-donor")
         compose.onNodeWithTag("role-donor").performClick()
@@ -41,10 +46,12 @@ class StubBackendFlowTest {
         waitFor("phone-input")
         compose.onNodeWithTag("phone-input").performTextInput("+14155551234")
         compose.waitForIdle()
+        waitEnabled("send-code")
         compose.onNodeWithTag("send-code").performClick()
         waitFor("code-input")
         compose.onNodeWithTag("code-input").performTextInput(code)
         compose.waitForIdle()
+        waitEnabled("verify-code")
         compose.onNodeWithTag("verify-code").performClick()
     }
 

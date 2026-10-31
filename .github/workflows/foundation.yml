@@ -52,4 +52,22 @@ jobs:
           done
           if [ "$READY" != true ]; then cat "$RUNNER_TEMP/emulator.log"; exit 1; fi
           adb shell input keyevent 82
+          for scale in window_animation_scale transition_animation_scale animator_duration_scale; do adb shell settings put global "$scale" 0; done
           ./gradlew :app:connectedDebugAndroidTest
+      - name: Name failing instrumentation tests
+        if: always()
+        run: |
+          shopt -s nullglob
+          for f in app/build/outputs/androidTest-results/connected/debug/TEST-*.xml app/build/outputs/androidTest-results/connected/*/TEST-*.xml; do
+            awk -v file="$f" '/<testcase /{name=$0} /<failure|<error/{print "FAILED: " name " (" file ")"}' "$f"
+          done
+          true
+      - name: Upload instrumentation results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: androidtest-results
+          path: |
+            app/build/outputs/androidTest-results/**
+            app/build/reports/androidTests/**
+          if-no-files-found: ignore
