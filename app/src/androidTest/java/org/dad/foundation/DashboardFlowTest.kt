@@ -2,6 +2,7 @@ package org.dad.foundation
 
 import android.content.Intent
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasTestTag
@@ -12,6 +13,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -45,13 +47,27 @@ class DashboardFlowTest {
 
     private fun openHistory() {
         waitFor("open-history")
-        // The dashboard can still be settling when the button first appears, swallowing the click: retry the
-        // click until the history screen is actually on screen rather than assuming one click landed.
-        compose.waitUntil(30_000) {
-            if (exists("history-screen")) return@waitUntil true
-            runCatching { compose.onNodeWithTag("open-history").performScrollTo().performClick() }
+        // The button is composed immediately, but both loading indicators above it are replaced by taller
+        // cards when the data lands, moving it. Click only once the layout has settled.
+        compose.waitUntil(15_000) { !exists("dashboard-loading") && !exists("initiative-loading") }
+        compose.waitForIdle()
+        compose.waitUntil(15_000) {
+            runCatching { compose.onNodeWithTag("open-history").assertIsEnabled() }.isSuccess
+        }
+        compose.onNodeWithTag("open-history").performScrollTo().performClick()
+        waitFor("history-screen")
+    }
+
+    @Test fun restoringASessionLoadsTheDashboardExactlyOnce() {
+        DebugBackend.resetRequestLog()
+        launch().use {
+            waitFor("streak-count")
+            waitFor("initiative-title")
             compose.waitForIdle()
-            exists("history-screen")
+            val log = DebugBackend.requestLog.toList()
+            listOf("GET /donor/me/profile", "GET /donor/me/dashboard", "GET /donor/me/today-initiative").forEach { call ->
+                assertEquals("$call must run once after restore: $log", 1, log.count { it == call })
+            }
         }
     }
 

@@ -28,6 +28,10 @@ import okio.Buffer
  * (`stub_dashboard_empty`, `stub_dashboard_fail_first`, `stub_dashboard_unranked`); see [StubDonorHome].
  */
 object DebugBackend {
+    /** Every request path the stub transport has served since [resetRequestLog], for tests. */
+    val requestLog: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf())
+    fun resetRequestLog() = requestLog.clear()
+
     const val ORIGIN = "https://stub.invalid"
     /** The public (link) origin the stub accepts claim links for, so a pasted sign-in link routes in UI tests. */
     const val PUBLIC_ORIGIN = ORIGIN
@@ -85,6 +89,7 @@ private class StubInterceptor(private val deletionBlocked: Boolean, scenario: St
 
     @Synchronized override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
+        DebugBackend.requestLog.add("${request.method} ${request.url.encodedPath}")
         val payload = request.body?.let { Buffer().also { buffer -> it.writeTo(buffer) }.readUtf8() }.orEmpty()
         val authorized = request.header("Authorization")?.startsWith("Bearer stub-access-") == true
         fun reply(code: Int, json: String = "{}") = Response.Builder().request(request).protocol(Protocol.HTTP_1_1)
