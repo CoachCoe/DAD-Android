@@ -140,8 +140,12 @@ data class RankingStanding(
             if (rankingsOptedOut) optedOut() else RankingStanding(nationalPercentile, city, cityRank)
     }
 
-    /** "Top 8% nationally" (from the 92nd percentile; never "Top 0%"), or null when opted out / unknown. */
-    val nationalLabel: String? get() = nationalPercentile?.takeUnless { optedOut }?.let { "Top ${(100 - it).coerceAtLeast(1)}% nationally" }
+    /**
+     * "Top 2% nationally". [nationalPercentile] is the server's top-percentile bucket (the contract's
+     * `national_percentile`: 1 = top 1%, 2 = top 2%), so it is shown as-is, never inverted as `100 - x`.
+     * Clamped to at least 1 (never "Top 0%"); null when opted out / unknown.
+     */
+    val nationalLabel: String? get() = nationalPercentile?.takeUnless { optedOut }?.let { "Top ${it.coerceAtLeast(1)}% nationally" }
 
     /** "#4 in Austin", or null when opted out / unknown. */
     val cityLabel: String? get() {

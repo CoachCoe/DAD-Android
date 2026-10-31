@@ -11,7 +11,7 @@ import okio.Buffer
 import java.util.concurrent.CopyOnWriteArrayList
 
 /** One request the app made, as the scripted transport saw it. */
-data class Recorded(val method: String, val path: String, val headers: Map<String, String>, val body: String)
+data class Recorded(val method: String, val path: String, val headers: Map<String, String>, val body: String, val query: String = "")
 
 /**
  * A scripted in-process transport: the real Retrofit/OkHttp stack runs, only the network is replaced.
@@ -25,7 +25,7 @@ class ScriptedHttp(private val handler: (Recorded) -> Pair<Int, String>) : Inter
     override fun intercept(chain: Interceptor.Chain): Response {
         val request: Request = chain.request()
         val body = request.body?.let { Buffer().also { buffer -> it.writeTo(buffer) }.readUtf8() }.orEmpty()
-        val recorded = Recorded(request.method, request.url.encodedPath, request.headers.toMultimap().mapValues { it.value.first() }, body)
+        val recorded = Recorded(request.method, request.url.encodedPath, request.headers.toMultimap().mapValues { it.value.first() }, body, request.url.encodedQuery.orEmpty())
         requests += recorded
         val (code, json) = handler(recorded)
         return Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(code).message("scripted")
