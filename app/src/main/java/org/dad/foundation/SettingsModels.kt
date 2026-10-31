@@ -46,6 +46,12 @@ class SettingsModel(private val service: SettingsService) : ViewModel() {
         private set
     var actionError: String? by mutableStateOf(null)
         private set
+    /**
+     * The server refused deletion (409) because a monthly gift is still set to renew or a checkout is open.
+     * The screen then offers the real cancel-gift flow instead of a dead end; a retry clears it.
+     */
+    var deletionBlocked: Boolean by mutableStateOf(false)
+        private set
     private val saveLock = Mutex()
     private var leaving = false
 
@@ -89,6 +95,7 @@ class SettingsModel(private val service: SettingsService) : ViewModel() {
         if (leaving) return
         leaving = true
         actionError = null
+        deletionBlocked = false
         viewModelScope.launch {
             try {
                 service.deleteAccount()
@@ -96,6 +103,7 @@ class SettingsModel(private val service: SettingsService) : ViewModel() {
                 throw error
             } catch (error: Exception) {
                 leaving = false
+                deletionBlocked = error is AccountFailure.DeletionBlocked
                 actionError = message(error)
                 return@launch
             }

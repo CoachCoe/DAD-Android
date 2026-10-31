@@ -69,32 +69,103 @@ fun formatUsdMinor(minor: Int): String {
 }
 
 /**
- * The recurring gift as the giving screens see it: either none set yet, an active
- * subscription, or one scheduled to stop at period end (the cancel path, G-8/G-9).
+ * Stripe's subscription status as the app uses it. The contract documents six values, but Stripe
+ * can send others (`paused`, `trialing`), so anything unrecognised is [OTHER] and the gift is still
+ * shown; a status never makes a response fail to decode. `canceled` and `incomplete_expired` have
+ * ended, so they are not represented here: the reader maps them to [RecurringState.None].
+ */
+enum class SubscriptionStatus {
+    ACTIVE, PAST_DUE, UNPAID, INCOMPLETE, OTHER;
+
+    /** A renewal has failed (or is failing): the donor should update the payment method. */
+    val needsPaymentAttention: Boolean get() = this == PAST_DUE || this == UNPAID
+
+    companion object {
+        fun parse(raw: String?): SubscriptionStatus = when (raw) {
+            "active" -> ACTIVE
+            "past_due" -> PAST_DUE
+            "unpaid" -> UNPAID
+            "incomplete" -> INCOMPLETE
+            else -> OTHER
+        }
+
+        /** Whether [raw] means the subscription has ended (`canceled`, `incomplete_expired`). */
+        fun isEnded(raw: String?): Boolean = raw == "canceled" || raw == "incomplete_expired"
+    }
+}
+
+/**
+ * The recurring gift as the giving screens see it: none yet, one the server has not counted yet
+ * (checkout finished, webhook pending), an active subscription, or one scheduled to stop at period
+ * end (the cancel path, G-8/G-9).
  */
 sealed interface RecurringState {
     data object None : RecurringState
-    data class Active(val subscriptionId: String, val amountMinor: Int, val periodEnd: Date) : RecurringState
+
+    /** The server has a gift in progress but has not counted it yet (`state: preparing`). */
+    data object Preparing : RecurringState
+
+    data class Active(
+        val subscriptionId: String,
+        val amountMinor: Int,
+        val periodEnd: Date,
+        val status: SubscriptionStatus = SubscriptionStatus.ACTIVE,
+    ) : RecurringState
 
     /** Cancelled but still running until [stopsAt] — the streak continues until then. */
-    data class Ending(val subscriptionId: String, val amountMinor: Int, val periodEnd: Date, val stopsAt: Date) : RecurringState
+    data class Ending(
+        val subscriptionId: String,
+        val amountMinor: Int,
+        val periodEnd: Date,
+        val stopsAt: Date,
+        val status: SubscriptionStatus = SubscriptionStatus.ACTIVE,
+    ) : RecurringState
 
     /** The subscription id recurring commands (change amount, cancel) need, when one exists. */
     val subscriptionIdOrNull: String?
         get() = when (this) {
-            is None -> null
+            is None, is Preparing -> null
             is Active -> subscriptionId
             is Ending -> subscriptionId
         }
 
     val amountMinorOrNull: Int?
         get() = when (this) {
-            is None -> null
+            is None, is Preparing -> null
             is Active -> amountMinor
             is Ending -> amountMinor
         }
 
     val isEnding: Boolean get() = this is Ending
+}
+
+/**
+ * What the amount endpoint offers for the subscription: the amount the next renewal will charge,
+ * when, and a change already on its way (queued but unconfirmed, or confirmed and waiting for its
+ * effective date). Minor units are integer USD cents.
+ */
+data class AmountOffer(
+    val subscriptionId: String,
+    val nextAmountMinor: Int,
+    val effectiveAt: Date,
+    val pending: Pending? = null,
+) {
+    data class Pending(val amountMinor: Int, val previousMinor: Int, val effectiveAt: Date, val confirmed: Boolean)
+}
+
+/** Where the hosted card update stands, from `GET /donor/me/payment-method`. */
+data class PaymentMethodState(val kind: Kind, val completedAt: Date? = null) {
+    enum class Kind {
+        NONE, PENDING, OPEN, APPLIED, EXPIRED, CANCELLED;
+
+        companion object {
+            /** An unknown value reads as [NONE]: the update is neither claimed nor assumed. */
+            fun parse(raw: String?): Kind = entries.firstOrNull { it.name == raw?.uppercase() } ?: NONE
+        }
+    }
+
+    /** An update is in flight: the donor started it and the server has not finished it. */
+    val isInFlight: Boolean get() = kind == Kind.PENDING || kind == Kind.OPEN
 }
 
 /**

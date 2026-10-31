@@ -58,8 +58,8 @@ configuration deprecation diagnostics; those upstream warnings are not suppresse
 
 ## Contract, sessions, and transport
 
-`foundation.lock.json` pins the mobile foundation release (currently 2.4.0, tag
-`mobile-foundation-v2.4.0`) and its manifest
+`foundation.lock.json` pins the mobile foundation release (currently 2.6.0, tag
+`mobile-foundation-v2.6.0`) and its manifest
 SHA-256. The vendored release is verified before code generation. The build invokes pinned
 OpenAPI Generator CLI 7.20.0 and generates Retrofit coroutine interfaces and Gson models
 for the operations allow-listed in `scripts/prepare-client.mjs`. No client is generated
@@ -171,3 +171,15 @@ HTTPS Go API: claim/profile, expired-access refresh and credential replacement,
 revocation cleanup, and logout. Test-only transports trust the temporary server's
 certificate; production TLS settings are unchanged. No provider credentials are used.
 The test runner removes the private proof fixtures after either success or failure.
+
+## Giving (wiring phase 3, contract 2.6.0)
+
+Starting a gift uses `startRecurringCheckout`; changing the amount, cancelling and the card update use
+`changeAmount`, `cancelRecurring` and `beginPaymentUpdate`. Hosted Stripe pages open in a Custom Tab
+(`androidx.browser`, already a dependency). The return page proves nothing: when the donor comes back the app
+polls `GET /donor/me/recurring` (5 reads, 2 s apart) until a subscription is present. Each command holds one
+Idempotency-Key, reused after a 429, 503 or lost response and retired on success, 403, 409 or 422. The giving
+reads are parsed from raw JSON so an unlisted Stripe status (`paused`, `trialing`) never fails the response.
+No App Link is registered for `/app/return`, so the donor closes the tab to return. Deleting an account with a
+renewing gift (409) offers "Cancel my monthly gift" first. Debug stub extras: `stub_gift_active`,
+`stub_gift_fail_first`, `stub_dashboard_slow`, `stub_open_gift`.

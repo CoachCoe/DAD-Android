@@ -31,6 +31,7 @@ class AppServices(
     val passwordSettings: PasswordSettingsService? = null,
     val external: ExternalSignInDeps = ExternalSignInDeps(),
     val dashboard: DashboardService? = null,
+    val giving: GivingKit? = null,
 )
 
 /** DEBUG launch switches. Always all-false in a release build. */
@@ -43,7 +44,14 @@ data class LaunchOptions(
     val stubSignedIn: Boolean = false,
     /** Stub backend only: what the scripted donor-home reads answer. */
     val stubDashboard: StubDashboard = StubDashboard.POPULATED,
+    /** Stub backend only: the donor's monthly gift at launch. */
+    val stubGift: StubGift = StubGift.NONE,
+    /** Stub backend only (screenshot and UI-test aid): open the gift screen straight from the donor home. */
+    val stubOpenGift: Boolean = false,
 )
 
 /** What the DEBUG stub backend answers for the donor-home reads. */
-enum class StubDashboard { POPULATED, EMPTY, FAIL_FIRST, UNRANKED }
+enum class StubDashboard { POPULATED, EMPTY, FAIL_FIRST, UNRANKED, SLOW }
+
+/** The monthly gift the DEBUG stub backend starts with. */
+enum class StubGift { NONE, ACTIVE, ACTIVE_FAIL_FIRST }

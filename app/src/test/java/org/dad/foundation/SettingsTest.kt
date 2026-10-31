@@ -10,6 +10,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -64,6 +65,7 @@ class SettingsTest {
         var failLoad: Boolean = false,
         var slowSave: Boolean = false,
         var signOutFails: Boolean = false,
+        var deleteFailure: AccountFailure? = null,
     ) : SettingsService {
         var deleted = false
         var deleteCalls = 0
@@ -84,7 +86,7 @@ class SettingsTest {
             prefs = preferences.copy(version = preferences.version + 1)
             return SettingsSnapshot(ProfileSummary("d@x.com", "DONOR", "78701", "Austin", null), prefs)
         }
-        override suspend fun deleteAccount() { deleteCalls++; deleted = true }
+        override suspend fun deleteAccount() { deleteCalls++; deleteFailure?.let { throw it }; deleted = true }
         override suspend fun signOut() {
             if (signOutFails) throw AccountFailure.Unavailable
             signedOut = true
@@ -126,6 +128,30 @@ class SettingsTest {
         assertTrue(svc.deleted)
         assertTrue(svc.signedOut)
         assertTrue(model.signedOut)
+    }
+
+    @Test fun aBlockedDeletionIsFlaggedSoTheScreenCanOfferToCancelTheGift() = runTest {
+        val svc = FakeService(deleteFailure = AccountFailure.DeletionBlocked)
+        val model = SettingsModel(svc)
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        model.deleteAccount(DeleteAccountGate("DELETE")); dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(model.deletionBlocked)
+        assertTrue(model.actionError!!.contains("Cancel your monthly gift first"))
+        assertFalse(model.signedOut)
+        // Once the gift no longer renews the retry goes through, and the flag clears with it.
+        svc.deleteFailure = null
+        model.deleteAccount(DeleteAccountGate("DELETE")); dispatcher.scheduler.advanceUntilIdle()
+        assertFalse(model.deletionBlocked)
+        assertTrue(svc.deleted)
+        assertTrue(model.signedOut)
+    }
+
+    @Test fun otherDeleteFailuresAreNotFlaggedAsBlocked() = runTest {
+        val model = SettingsModel(FakeService(deleteFailure = AccountFailure.Unavailable))
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        model.deleteAccount(DeleteAccountGate("DELETE")); dispatcher.scheduler.advanceUntilIdle()
+        assertFalse(model.deletionBlocked)
+        assertNotNull(model.actionError)
     }
 
     @Test fun signOutWipes() = runTest {

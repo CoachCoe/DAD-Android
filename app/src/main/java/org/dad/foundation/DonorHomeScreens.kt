@@ -3,6 +3,7 @@ package org.dad.foundation
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,9 +24,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import java.time.LocalDate
@@ -47,7 +52,7 @@ internal fun friendlyDate(value: String): String =
 private fun friendlyDate(value: OffsetDateTime): String = value.toLocalDate().format(mediumDate)
 
 @Composable
-private fun HomeCard(tag: String, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+internal fun HomeCard(tag: String, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Surface(
         modifier = modifier.fillMaxWidth().testTag(tag),
         shape = RoundedCornerShape(DadTheme.radius("card").takeIf { it.value > 0f } ?: 16.dp),
@@ -58,13 +63,15 @@ private fun HomeCard(tag: String, modifier: Modifier = Modifier, content: @Compo
 
 /** The dashboard cards, today's initiative and the way into gift history. */
 @Composable
-fun DonorHome(model: DashboardModel, onOpenHistory: () -> Unit, onSignedOut: () -> Unit) {
-    LaunchedEffect(Unit) { model.load() }
+fun DonorHome(
+    model: DashboardModel, giving: GivingModel? = null, onOpenGift: () -> Unit = {}, onOpenHistory: () -> Unit, onSignedOut: () -> Unit,
+) {
+    LaunchedEffect(Unit) { model.load(); giving?.load() }
     LaunchedEffect(model.signedOut) { if (model.signedOut) onSignedOut() }
     Column(Modifier.fillMaxWidth().testTag("donor-home"), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         model.refreshNotice?.let { Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("dashboard-notice")) }
         when (val phase = model.phase) {
-            DashboardModel.Phase.Loading -> Column(Modifier.testTag("dashboard-loading")) { CircularProgressIndicator(); Text("Loading your dashboard…") }
+            DashboardModel.Phase.Loading -> DashboardSkeleton()
             is DashboardModel.Phase.Failed -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(phase.message, modifier = Modifier.testTag("dashboard-error"))
                 Button(onClick = { model.load() }, modifier = Modifier.heightIn(min = 48.dp).testTag("dashboard-retry")) { Text("Try again") }
@@ -78,8 +85,69 @@ fun DonorHome(model: DashboardModel, onOpenHistory: () -> Unit, onSignedOut: () 
                 is DashboardState.Ready -> DashboardCards(state.dashboard)
             }
         }
+        giving?.let { GiftSummaryCard(it, onManage = onOpenGift) }
         InitiativeCard(model.initiative, onRetry = { model.load() })
         OutlinedButton(onClick = onOpenHistory, modifier = Modifier.heightIn(min = 48.dp).testTag("open-history")) { Text("Gift history") }
+    }
+}
+
+/**
+ * What stands in for the dashboard cards while they load. It lays out the same cards in the same type styles as
+ * the real ones (dimmed, with a spinner over the top), so when the data lands nothing below it — the gift card, the
+ * initiative and the "Gift history" button — jumps under the donor's thumb. The text is decoration, not content:
+ * it is hidden from accessibility, which hears one "Loading your dashboard" instead.
+ */
+@Composable
+private fun DashboardSkeleton() {
+    Box(
+        Modifier.fillMaxWidth().testTag("dashboard-loading").semantics { contentDescription = "Loading your dashboard" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(Modifier.fillMaxWidth().alpha(0.35f).clearAndSetSemantics { }, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            HomeCard("skeleton-streak") {
+                Text("Founding donor", style = MaterialTheme.typography.labelLarge)
+                Text("00-day streak", style = MaterialTheme.typography.headlineMedium)
+                DadStreakBar(filled = 0)
+                Text("00 days to your 00-day milestone", style = MaterialTheme.typography.bodyMedium)
+                Text("Top 0% nationally", style = MaterialTheme.typography.titleSmall)
+                Text("#0 in your city", style = MaterialTheme.typography.bodyMedium)
+            }
+            HomeCard("skeleton-impact") {
+                Text("Total given", style = MaterialTheme.typography.labelLarge)
+                Text("$0,000", style = MaterialTheme.typography.headlineMedium)
+                Text("0 initiatives funded · 0 events volunteered", style = MaterialTheme.typography.bodyMedium)
+            }
+            HomeCard("skeleton-network") {
+                Text("Your network", style = MaterialTheme.typography.titleMedium)
+                Text("Together your network funds $0,000 a year")
+                Text("0 active donors", style = MaterialTheme.typography.bodyMedium)
+                Text("0 joined through you · $0 given", style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        CircularProgressIndicator()
+    }
+}
+
+/** The initiative card's loading body, shaped like its loaded one for the same reason as [DashboardSkeleton]. */
+@Composable
+private fun InitiativeSkeleton() {
+    Box(
+        Modifier.fillMaxWidth().testTag("initiative-loading").semantics { contentDescription = "Loading today’s initiative" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(Modifier.fillMaxWidth().alpha(0.35f).clearAndSetSemantics { }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Today’s initiative", style = MaterialTheme.typography.titleLarge)
+            Text("Location · Program · Started Jan 1, 2025", style = MaterialTheme.typography.bodyMedium)
+            Text("A short summary of the initiative.")
+            repeat(3) {
+                Column {
+                    Text("0,000 people", style = MaterialTheme.typography.titleMedium)
+                    Text("Metric", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Text(HomeInitiative.ATTRIBUTION_NOTE, style = MaterialTheme.typography.bodySmall)
+        }
+        CircularProgressIndicator()
     }
 }
 
@@ -138,7 +206,7 @@ private fun InitiativeCard(phase: DashboardModel.InitiativePhase, onRetry: () ->
     HomeCard("initiative-card") {
         Text("Today your $1 funded", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
         when (phase) {
-            DashboardModel.InitiativePhase.Loading -> CircularProgressIndicator(Modifier.testTag("initiative-loading"))
+            DashboardModel.InitiativePhase.Loading -> InitiativeSkeleton()
             DashboardModel.InitiativePhase.None ->
                 Text("Nothing is in today’s rotation yet. Check back tomorrow.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("initiative-none"))
             DashboardModel.InitiativePhase.Failed -> {
