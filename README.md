@@ -16,6 +16,22 @@ reachable from the donor shell; sign-out, deletion and a revoked session return 
 sign-in is not wired (it shows an honest notice). A
 release build with no `dadApiOrigin` shows a "not configured" notice and never serves synthetic data.
 
+**Wired against the API (Phase 2, donor home):** the signed-in donor landing now shows the real dashboard
+(`GET /donor/me/dashboard`: streak card with the 30-day ladder and at-risk grace notice, national/city rank,
+total given, network and referral totals; `preparing` shows "Getting your dashboard ready"), today's initiative
+(`todayInitiative`; a 404 means nothing is in rotation, not an error; the card carries the A-5 note that this is
+display attribution, not designated giving) and a gift history screen (`gifts` 50 per page, capped at 500 rows in
+memory, a non-advancing offset ends paging, paging cancels when the screen closes) with an inline gift record
+(`receipt`) and the calendar-year total (`annualSummary`). The rank line follows the explicit
+`rankings_opted_out` flag (opted out shows no rank line; opted in but unranked says "Not ranked yet"), and
+`national_percentile` is shown as the top bucket it is (2 = "Top 2%"). Unknown figures (a null streak, network,
+referrals or total given) are shown as unknown, never as zero. A failed refresh keeps the cards on screen with a
+notice; a 401 refreshes once and then signs out; an undocumented 429 is "too many requests", any other
+undocumented status is "unavailable". These five GETs are decoded from raw JSON in `WireDashboard` with strict
+null handling, because the generated Kotlin models flatten the dashboard's `oneOf` and turn nullable members
+into non-null types that Gson would silently fill with zeros. Not wired yet: `saveProfile`, the A-3 spend
+drill-in, receipt PDF/share. The other product screens (giving, events, network/badges, partner) remain DEBUG previews.
+
 Account deletion calls `POST /donor/me/delete` first and wipes local state (Keystore credentials and
 attribution) only on success; a 409 (active monthly gift or open checkout) is explained and nothing is
 wiped. Disclose in the Play Data safety "account deletion" answers that personal data is deleted while
@@ -34,7 +50,7 @@ node scripts/check-foundation.mjs
 ```
 
 Open this folder in Android Studio and run the app on Android 8/API 26 or newer.
-By default a debug build uses a labeled synthetic account through the session API (`preview_signed_out` starts it signed out; code 123456 signs in). The `stub_backend` extra runs the REAL sign-in, session and settings code on a scripted in-process transport (debug source set only) for the instrumentation tests. Android
+By default a debug build uses a labeled synthetic account through the session API (`preview_signed_out` starts it signed out; code 123456 signs in). The `stub_backend` extra runs the REAL sign-in, session, settings and donor-home code on a scripted in-process transport (debug source set only) for the instrumentation tests; `stub_signed_in` starts with a stored session, and `stub_dashboard_empty` / `stub_dashboard_fail_first` / `stub_dashboard_unranked` pick the donor-home scenario. Android
 instrumentation tests cover the Compose journeys and actual Keystore storage:
 `./gradlew :app:connectedDebugAndroidTest` with a running emulator. CI runs the same
 checks on API 35, and lint treats warnings as errors. AGP 9.4 itself emits Gradle
