@@ -38,7 +38,8 @@ object DebugBackend {
 
     fun stub(context: Context, scope: CoroutineScope, options: LaunchOptions): AppServices? {
         if (!options.stubBackend) return null
-        val http = OkHttpClient.Builder().addInterceptor(StubInterceptor(options.stubDeleteBlocked, options.stubDashboard)).build()
+        val interceptor = StubInterceptor(options.stubDeleteBlocked, options.stubDashboard, options.stubGift)
+        val http = OkHttpClient.Builder().addInterceptor(interceptor).build()
         val store = InMemoryCredentialStore(
             if (options.stubSignedIn) Credentials("stub-access-0", "stub-refresh-0-xxxxxxxxxxxxxxxxxxxxxxxxxxxx", Long.MAX_VALUE) else null,
         )
@@ -53,6 +54,7 @@ object DebugBackend {
             passwordSignIn = credentialAuth,
             passwordSettings = WirePasswordSettings(ProductClient(ORIGIN, session, http)),
             dashboard = WireDashboard(ProductClient(ORIGIN, session, http)),
+            giving = GivingKit(WireGiving(ProductClient(ORIGIN, session, http)), stubComplete = interceptor::completeHandoff, pollDelayMs = 200),
         )
     }
 }
@@ -63,8 +65,9 @@ class InMemoryCredentialStore(private var value: Credentials? = null) : Credenti
     @Synchronized override fun clear() { value = null }
 }
 
-private class StubInterceptor(private val deletionBlocked: Boolean, scenario: StubDashboard) : Interceptor {
+private class StubInterceptor(private val deletionBlocked: Boolean, scenario: StubDashboard, gift: StubGift) : Interceptor {
     private val home = StubDonorHome(scenario)
+    private val giving = StubGiving(gift)
     private var generation = 0
     private var deleted = false
     private var version = 3
@@ -75,6 +78,9 @@ private class StubInterceptor(private val deletionBlocked: Boolean, scenario: St
         "push_event_promoted" to false, "push_gift_processed" to true, "rankings_opted_out" to false,
         "network_visible" to true, "volunteer" to true,
     )
+
+    /** Plays the Stripe webhook after the stubbed hosted page "finishes": a gift starts, or a card is applied. */
+    @Synchronized fun completeHandoff(purpose: HostedHandoff.Purpose) = giving.complete(purpose)
 
     @Synchronized private fun session(): String {
         generation++
@@ -133,11 +139,14 @@ private class StubInterceptor(private val deletionBlocked: Boolean, scenario: St
             }
             "POST" to "/donor/me/delete" -> when {
                 !authorized || deleted -> reply(401)
-                deletionBlocked -> reply(409)
+                deletionBlocked || giving.blocksDeletion -> reply(409)
                 else -> { deleted = true; reply(200, """{"deleted":true}""") }
             }
             "POST" to "/donor/logout" -> reply(200, """{"signed_out":true}""")
-            else -> if (request.method == "GET" && request.url.encodedPath.startsWith("/donor/me/")) {
+            else -> if (request.url.encodedPath.startsWith("/donor/me/recurring") || request.url.encodedPath.startsWith("/donor/me/payment-method")) {
+                if (!authorized || deleted) reply(401)
+                else giving.answer(request.method, request.url.encodedPath, payload, request.header("Idempotency-Key")).let { (code, json) -> reply(code, json) }
+            } else if (request.method == "GET" && request.url.encodedPath.startsWith("/donor/me/")) {
                 if (!authorized || deleted) reply(401)
                 else home.answer(request.url.encodedPath, request.url.queryParameter("offset")?.toIntOrNull()).let { (code, json) -> reply(code, json) }
             } else reply(404)

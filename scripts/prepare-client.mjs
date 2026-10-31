@@ -21,7 +21,7 @@ const allowed = new Set([
   "requestEmailChange", "confirmEmailChange",
   // donor account + giving
   "dashboard", "gifts", "recurring", "cancelRecurring", "changeAmount", "amountOptions",
-  "paymentMethod", "beginPaymentUpdate", "receipt", "annualSummary",
+  "paymentMethod", "beginPaymentUpdate", "startRecurringCheckout", "receipt", "annualSummary",
   "savePreferences", "saveProfile", "saveSharing", "sharing", "deleteAccount",
   "walletProviders", "applePass", "googlePass",
   // impact / streak / initiatives / rankings

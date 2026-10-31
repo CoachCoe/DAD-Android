@@ -24,6 +24,8 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.darkColorScheme
@@ -37,6 +39,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -144,6 +147,8 @@ class AccountModel(
         private set
     var dashboard: DashboardService? by mutableStateOf(null)
         private set
+    var giving: GivingKit? by mutableStateOf(null)
+        private set
     private var loading = false
     private var pendingProof: String? = null
     private var completedProof: String? = null
@@ -164,7 +169,7 @@ class AccountModel(
         try {
             withContext(io) { factory(CoroutineScope(viewModelScope.coroutineContext + io), options) }
                 .also {
-                    services = it; signIn = it.signIn; settings = it.settings; passwordSettings = it.passwordSettings; dashboard = it.dashboard
+                    services = it; signIn = it.signIn; settings = it.settings; passwordSettings = it.passwordSettings; dashboard = it.dashboard; giving = it.giving
                     auth = AuthServices(it.signIn, it.signup, it.passwordSignIn, it.external)
                 }
         } catch (cancelled: CancellationException) { throw cancelled }
@@ -298,8 +303,16 @@ class MainActivity : ComponentActivity() {
                 intent.getBooleanExtra("stub_dashboard_empty", false) -> StubDashboard.EMPTY
                 intent.getBooleanExtra("stub_dashboard_fail_first", false) -> StubDashboard.FAIL_FIRST
                 intent.getBooleanExtra("stub_dashboard_unranked", false) -> StubDashboard.UNRANKED
+                intent.getBooleanExtra("stub_dashboard_slow", false) -> StubDashboard.SLOW
                 else -> StubDashboard.POPULATED
             },
+            stubGift = when {
+                !BuildConfig.DEBUG -> StubGift.NONE
+                intent.getBooleanExtra("stub_gift_fail_first", false) -> StubGift.ACTIVE_FAIL_FIRST
+                intent.getBooleanExtra("stub_gift_active", false) -> StubGift.ACTIVE
+                else -> StubGift.NONE
+            },
+            stubOpenGift = BuildConfig.DEBUG && intent.getBooleanExtra("stub_open_gift", false),
         )
         val giving = BuildConfig.DEBUG && intent.getBooleanExtra("preview_giving", false)
         val impact = BuildConfig.DEBUG && intent.getBooleanExtra("preview_impact", false)
@@ -337,6 +350,7 @@ class MainActivity : ComponentActivity() {
                             passwordSignIn = credentialAuth,
                             passwordSettings = WirePasswordSettings(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
                             dashboard = WireDashboard(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
+                            giving = GivingKit(WireGiving(ProductClient(BuildConfig.DAD_API_ORIGIN, session))),
                             external = ExternalSignInDeps(
                                 // No Credential Manager provider is linked, so a configured ID alone never switches a method on.
                                 capabilities = SignInCapabilities.of(SignInConfig(BuildConfig.DAD_GOOGLE_WEB_CLIENT_ID, BuildConfig.DAD_PASSKEY_RP_ID)),
@@ -389,7 +403,7 @@ class MainActivity : ComponentActivity() {
                                 // Giving preview exercises the signed-in GiftScreen directly. The
                                 // donor shell reaches Restoring/Authenticated immediately (hasSession
                                 // starts true), so there is no load-delay gap to short-circuit.
-                                GiftScreen(viewModel(factory = GivingModel.previewFactory()))
+                                GiftScreen(viewModel(factory = GivingModel.previewFactory()), stubComplete = { })
                             } else if (impact) {
                                 ImpactHome(viewModel(factory = EngagementModel.previewFactory()))
                             } else if (network) {
@@ -399,7 +413,7 @@ class MainActivity : ComponentActivity() {
                             } else if (settings) {
                                 SettingsHome(viewModel(factory = SettingsModel.previewFactory()))
                             } else {
-                                DonorShell(model)
+                                DonorShell(model, openGiftAtLaunch = launch.stubOpenGift)
                             }
                         is RoleRouter.Root.Unauthenticated -> UnauthenticatedStack(
                             notice = model.notice,
@@ -418,36 +432,58 @@ class MainActivity : ComponentActivity() {
 
 /** The donor shell: the landing, with Settings (sign-out and account deletion) one tap away. */
 @Composable
-private fun DonorShell(model: AccountModel) {
+private fun DonorShell(model: AccountModel, openGiftAtLaunch: Boolean = false) {
     var inSettings by rememberSaveable { mutableStateOf(false) }
     var inHistory by rememberSaveable { mutableStateOf(false) }
+    var inGift by rememberSaveable { mutableStateOf(openGiftAtLaunch) }
     val service = model.settings
     val dashboard = model.dashboard
-    if (inHistory && dashboard != null) {
+    val kit = model.giving
+    // One giving model for the whole signed-in session: the home card, the gift screen and the
+    // cancel-before-delete path in Settings all read the same state, so a change shows everywhere at once.
+    val giving: GivingModel? = kit?.let { viewModel(key = "giving-${model.generation}", factory = GivingModel.factory(it)) }
+    // Screens swap in and out of this one slot; the holder keeps each one's remembered state (the half-typed
+    // delete confirmation in Settings) while another screen is on top.
+    val holder = rememberSaveableStateHolder()
+    if (inGift && giving != null) {
+        BackHandler { inGift = false }
+        holder.SaveableStateProvider("gift") {
+            GiftScreen(giving, stubComplete = kit.stubComplete, onClose = { inGift = false }, onSignedOut = { inGift = false; model.onSignedOut() })
+        }
+    } else if (inHistory && dashboard != null) {
         BackHandler { inHistory = false }
-        GiftHistoryScreen(
-            viewModel(key = "history-${model.generation}", factory = GiftHistoryModel.factory(dashboard)),
-            onClose = { inHistory = false },
-            onSignedOut = { inHistory = false; model.onSignedOut() },
-        )
+        holder.SaveableStateProvider("history") {
+            GiftHistoryScreen(
+                viewModel(key = "history-${model.generation}", factory = GiftHistoryModel.factory(dashboard)),
+                onClose = { inHistory = false },
+                onSignedOut = { inHistory = false; model.onSignedOut() },
+            )
+        }
     } else if (inSettings && service != null) {
         BackHandler { inSettings = false }
-        SettingsHome(
-            viewModel(key = "settings-${model.generation}", factory = SettingsModel.factory(service)),
-            onBack = { inSettings = false },
-            onSignedOut = { model.onSignedOut() },
-            password = model.passwordSettings?.let { passwordService ->
-                viewModel<PasswordChangeModel>(key = "password-${model.generation}", factory = PasswordChangeModel.factory(passwordService))
-            },
-        )
+        holder.SaveableStateProvider("settings") {
+            SettingsHome(
+                viewModel(key = "settings-${model.generation}", factory = SettingsModel.factory(service)),
+                onBack = { inSettings = false },
+                onSignedOut = { model.onSignedOut() },
+                password = model.passwordSettings?.let { passwordService ->
+                    viewModel<PasswordChangeModel>(key = "password-${model.generation}", factory = PasswordChangeModel.factory(passwordService))
+                },
+                onCancelGift = if (giving != null) ({ inGift = true }) else null,
+            )
+        }
     } else {
-        DonorLanding(model, onSettings = if (service != null) ({ inSettings = true }) else null) {
-            if (dashboard != null && model.state is AccountState.Ready) {
-                DonorHome(
-                    viewModel(key = "home-${model.generation}", factory = DashboardModel.factory(dashboard)),
-                    onOpenHistory = { inHistory = true },
-                    onSignedOut = { model.onSignedOut() },
-                )
+        holder.SaveableStateProvider("home") {
+            DonorLanding(model, onSettings = if (service != null) ({ inSettings = true }) else null) {
+                if (dashboard != null && model.state is AccountState.Ready) {
+                    DonorHome(
+                        viewModel(key = "home-${model.generation}", factory = DashboardModel.factory(dashboard)),
+                        giving = giving,
+                        onOpenGift = { inGift = true },
+                        onOpenHistory = { inHistory = true },
+                        onSignedOut = { model.onSignedOut() },
+                    )
+                }
             }
         }
     }
@@ -487,77 +523,6 @@ private fun DonorLanding(model: AccountModel, onSettings: (() -> Unit)? = null, 
         home()
         Spacer(Modifier.height(28.dp))
         if (BuildConfig.DAD_API_ORIGIN.isBlank()) Text("Preview · Sample account", style = MaterialTheme.typography.labelLarge)
-    }
-}
-
-/**
- * Set-your-gift screen (G-1/G-2/G-7/G-8/G-9). Whole-dollar stepper $1…$30/day with the
- * monthly ×30 echo and the streak bar; the cancel confirmation is rendered INLINE (never an
- * OS dialog/bottom sheet) so it is deterministic in UI automation — the lesson the iOS side
- * learned across three CI rounds.
- */
-@Composable
-private fun GiftScreen(model: GivingModel) {
-    LaunchedEffect(Unit) { model.load() }
-    var confirmingCancel by rememberSaveable { mutableStateOf(false) }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .safeDrawingPadding()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp)
-            .testTag("gift-screen"),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text("Set your gift", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
-        Text(
-            model.selection.dailyLabel,
-            style = MaterialTheme.typography.displaySmall,
-            modifier = Modifier.testTag("gift-daily"),
-        )
-        Text(
-            "${model.selection.monthlyLabel} · charged monthly",
-            style = MaterialTheme.typography.bodyLarge,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(onClick = { model.decrement() }, modifier = Modifier.testTag("gift-decrease")) { Text("Decrease gift") }
-            Button(onClick = { model.increment() }, modifier = Modifier.testTag("gift-increase")) { Text("Increase gift") }
-        }
-        DadStreakBar(filled = model.selection.dailyDollars.coerceAtMost(30))
-        DadPrimaryButton("Save gift") { model.applySelection() }
-        if (model.phase == GivingPhase.Working) CircularProgressIndicator(modifier = Modifier.testTag("gift-working"))
-
-        if (model.recurring is RecurringState.Active) {
-            if (confirmingCancel) {
-                val periodEnd = (model.recurring as RecurringState.Active).periodEnd
-                Column(
-                    modifier = Modifier.testTag("cancel-confirm"),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text("Cancel your gift?", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
-                    Text(CancelCopy.confirmation(periodEnd))
-                    Button(onClick = { model.cancel(); confirmingCancel = false }) { Text("End my gift") }
-                    Button(onClick = { confirmingCancel = false }) { Text("Keep giving") }
-                }
-            } else {
-                Button(onClick = { confirmingCancel = true }, modifier = Modifier.testTag("gift-cancel")) { Text("Cancel gift") }
-            }
-        } else if (model.recurring is RecurringState.Ending) {
-            // Post-cancel acknowledgement (G-8/G-9): the gift is cancelled but keeps running until
-            // the paid period ends, and the streak continues until then. Without this the whole
-            // cancel block vanished after a successful cancel with no feedback.
-            val ending = model.recurring as RecurringState.Ending
-            Text(
-                CancelCopy.confirmation(ending.periodEnd),
-                modifier = Modifier.testTag("gift-ending"),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-
-        when (val phase = model.phase) {
-            is GivingPhase.Failed -> Text(phase.message, modifier = Modifier.testTag("gift-error"))
-            else -> {}
-        }
     }
 }
 
@@ -846,6 +811,7 @@ private fun EventRow(model: EventsModel, event: DonorEvent, confirmingCancel: St
 @Composable
 private fun SettingsHome(
     model: SettingsModel, onBack: (() -> Unit)? = null, onSignedOut: (() -> Unit)? = null, password: PasswordChangeModel? = null,
+    onCancelGift: (() -> Unit)? = null,
 ) {
     LaunchedEffect(Unit) { model.load() }
     LaunchedEffect(model.signedOut) { if (model.signedOut) onSignedOut?.invoke() }
@@ -877,7 +843,8 @@ private fun SettingsHome(
                 }
             is SettingsPhase.Ready -> model.snapshot?.let { snapshot ->
                 SettingsContent(model, snapshot, confirmingDelete, deleteTyped,
-                    onConfirmingChange = { confirmingDelete = it }, onTypedChange = { deleteTyped = it }, password = password)
+                    onConfirmingChange = { confirmingDelete = it }, onTypedChange = { deleteTyped = it }, password = password,
+                    onCancelGift = onCancelGift)
             }
         }
         model.actionError?.let { Text(it, modifier = Modifier.testTag("settings-action-error")) }
@@ -888,6 +855,7 @@ private fun SettingsHome(
 private fun SettingsContent(
     model: SettingsModel, snapshot: SettingsSnapshot, confirmingDelete: Boolean, deleteTyped: String,
     onConfirmingChange: (Boolean) -> Unit, onTypedChange: (String) -> Unit, password: PasswordChangeModel? = null,
+    onCancelGift: (() -> Unit)? = null,
 ) {
     // Profile header — role is immutable (D-1), ZIP drives streak day rollover.
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -935,6 +903,11 @@ private fun SettingsContent(
                 enabled = DeleteAccountGate(deleteTyped).isConfirmed,
                 modifier = Modifier.testTag("delete-confirm"),
             ) { Text("Permanently delete") }
+            // The server refuses deletion while a monthly gift is set to renew (or a checkout is open): rather than
+            // a dead end, offer the real cancel-gift flow, then the donor comes back here and deletes.
+            if (model.deletionBlocked && onCancelGift != null) {
+                OutlinedButton(onClick = onCancelGift, modifier = Modifier.heightIn(min = 48.dp).testTag("delete-cancel-gift")) { Text("Cancel my monthly gift") }
+            }
             Button(onClick = { onConfirmingChange(false); onTypedChange("") }) { Text("Keep my account") }
         }
     }

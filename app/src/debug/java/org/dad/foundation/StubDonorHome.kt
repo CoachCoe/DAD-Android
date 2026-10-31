@@ -11,7 +11,13 @@ internal class StubDonorHome(private val scenario: StubDashboard) {
     /** Under FAIL_FIRST the first read of each kind is a 503, so the UI test sees the error and its retry. */
     private fun failsThisTime(key: String) = scenario == StubDashboard.FAIL_FIRST && failuresServed.add(key)
 
-    fun answer(path: String, offset: Int?): Pair<Int, String> = when {
+    fun answer(path: String, offset: Int?): Pair<Int, String> {
+        // SLOW holds the two home cards' reads back, so a UI test can look at the loading layout and compare it.
+        if (scenario == StubDashboard.SLOW && (path == "/donor/me/dashboard" || path == "/donor/me/today-initiative")) Thread.sleep(SLOW_MILLIS)
+        return respond(path, offset)
+    }
+
+    private fun respond(path: String, offset: Int?): Pair<Int, String> = when {
         path == "/donor/me/dashboard" -> when {
             failsThisTime("dashboard") -> 503 to UNAVAILABLE
             scenario == StubDashboard.EMPTY -> 200 to PREPARING
@@ -40,6 +46,7 @@ internal class StubDonorHome(private val scenario: StubDashboard) {
 
     private companion object {
         const val GIFT_TOTAL = 120
+        const val SLOW_MILLIS = 1_500L
         const val UNAVAILABLE = """{"detail":"unavailable"}"""
         const val NOT_FOUND = """{"detail":"not found"}"""
         const val PREPARING = """{"state":"preparing","mode":"test"}"""

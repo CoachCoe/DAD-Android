@@ -160,32 +160,32 @@ class WireDashboard(private val product: ProductClient) : DashboardService {
 
 // MARK: strict JSON readers. Anything absent or of the wrong type is an invalid response, never a default.
 
-private fun Response<JsonElement>.body_(): JsonElement = requireBody()
+internal fun Response<JsonElement>.body_(): JsonElement = requireBody()
 
-private fun JsonElement.asObjectOrInvalid(): JsonObject = if (isJsonObject) asJsonObject else throw AccountFailure.InvalidResponse
-private fun JsonElement.asBooleanOrInvalid(): Boolean =
+internal fun JsonElement.asObjectOrInvalid(): JsonObject = if (isJsonObject) asJsonObject else throw AccountFailure.InvalidResponse
+internal fun JsonElement.asBooleanOrInvalid(): Boolean =
     if (isJsonPrimitive && asJsonPrimitive.isBoolean) asBoolean else throw AccountFailure.InvalidResponse
 
-private fun JsonObject.value(key: String): JsonElement? = get(key)?.takeUnless { it.isJsonNull }
-private fun JsonObject.str(key: String): String =
+internal fun JsonObject.value(key: String): JsonElement? = get(key)?.takeUnless { it.isJsonNull }
+internal fun JsonObject.str(key: String): String =
     value(key)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString ?: throw AccountFailure.InvalidResponse
-private fun JsonObject.optStr(key: String): String? =
+internal fun JsonObject.optStr(key: String): String? =
     value(key)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString?.takeUnless { it.isEmpty() }
-private fun JsonObject.bool(key: String): Boolean = value(key)?.asBooleanOrInvalid() ?: throw AccountFailure.InvalidResponse
-private fun JsonObject.long(key: String): Long = optLong(key) ?: throw AccountFailure.InvalidResponse
-private fun JsonObject.optLong(key: String): Long? {
+internal fun JsonObject.bool(key: String): Boolean = value(key)?.asBooleanOrInvalid() ?: throw AccountFailure.InvalidResponse
+internal fun JsonObject.long(key: String): Long = optLong(key) ?: throw AccountFailure.InvalidResponse
+internal fun JsonObject.optLong(key: String): Long? {
     val element = value(key) ?: return null
     if (!element.isJsonPrimitive || !element.asJsonPrimitive.isNumber) throw AccountFailure.InvalidResponse
     return try { element.asBigDecimal.longValueExact() } catch (_: ArithmeticException) { throw AccountFailure.InvalidResponse }
 }
-private fun JsonObject.obj(key: String): JsonObject = value(key)?.asObjectOrInvalid() ?: throw AccountFailure.InvalidResponse
-private fun JsonObject.optObj(key: String): JsonObject? = value(key)?.asObjectOrInvalid()
-private fun JsonObject.array(key: String): com.google.gson.JsonArray =
+internal fun JsonObject.obj(key: String): JsonObject = value(key)?.asObjectOrInvalid() ?: throw AccountFailure.InvalidResponse
+internal fun JsonObject.optObj(key: String): JsonObject? = value(key)?.asObjectOrInvalid()
+internal fun JsonObject.array(key: String): com.google.gson.JsonArray =
     value(key)?.takeIf { it.isJsonArray }?.asJsonArray ?: throw AccountFailure.InvalidResponse
-private fun JsonObject.time(key: String): OffsetDateTime = optTime(key) ?: throw AccountFailure.InvalidResponse
-private fun JsonObject.optTime(key: String): OffsetDateTime? {
+internal fun JsonObject.time(key: String): OffsetDateTime = optTime(key) ?: throw AccountFailure.InvalidResponse
+internal fun JsonObject.optTime(key: String): OffsetDateTime? {
     val text = value(key)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString ?: return null
     return try { OffsetDateTime.parse(text) } catch (_: java.time.format.DateTimeParseException) { throw AccountFailure.InvalidResponse }
 }
-private fun Long.toIntOrInvalid(): Int = if (this in Int.MIN_VALUE..Int.MAX_VALUE) toInt() else throw AccountFailure.InvalidResponse
-private fun Long.clampToInt(): Int = coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+internal fun Long.toIntOrInvalid(): Int = if (this in Int.MIN_VALUE..Int.MAX_VALUE) toInt() else throw AccountFailure.InvalidResponse
+internal fun Long.clampToInt(): Int = coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()

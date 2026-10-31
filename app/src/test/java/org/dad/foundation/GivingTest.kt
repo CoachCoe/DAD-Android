@@ -93,7 +93,10 @@ class GivingTest {
             cancelCalls++
             return RecurringState.Ending(subscriptionId, 3000, periodEnd, Date(periodEnd.time + 1))
         }
+        override suspend fun amountOffer(): AmountOffer? = null
+        override suspend fun paymentMethod(): PaymentMethodState = PaymentMethodState(PaymentMethodState.Kind.NONE)
         override suspend fun beginPayment(): PaymentPath = PaymentPath.WebCheckoutHandoff("https://pay.example/setup")
+        override suspend fun startGift(amountMinor: Int): PaymentPath = PaymentPath.WebCheckoutHandoff("https://pay.example/checkout")
     }
 
     @Test fun loadSyncsSelectionToActiveAmount() = runTest {
