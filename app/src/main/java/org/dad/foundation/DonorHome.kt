@@ -90,12 +90,15 @@ sealed interface DashboardState {
 data class HomeMetric(val label: String, val value: Long, val unit: Unit?, val verifiedOn: String) {
     enum class Unit { USD_CENTS, PEOPLE, INITIATIVES, PARTNERS }
 
-    val valueLabel: String get() = when (unit) {
-        Unit.USD_CENTS -> formatMinorUsd(value)
-        Unit.PEOPLE -> "$value ${if (value == 1L) "person" else "people"}"
-        Unit.INITIATIVES -> "$value ${if (value == 1L) "initiative" else "initiatives"}"
-        Unit.PARTNERS -> "$value ${if (value == 1L) "partner" else "partners"}"
-        null -> "$value"
+    val valueLabel: String get() {
+        val count = String.format(java.util.Locale.US, "%,d", value)
+        return when (unit) {
+            Unit.USD_CENTS -> formatMinorUsd(value)
+            Unit.PEOPLE -> "$count ${if (value == 1L) "person" else "people"}"
+            Unit.INITIATIVES -> "$count ${if (value == 1L) "initiative" else "initiatives"}"
+            Unit.PARTNERS -> "$count ${if (value == 1L) "partner" else "partners"}"
+            null -> count
+        }
     }
 }
 

@@ -63,7 +63,7 @@ class WireDashboardTest {
         assertEquals(18, d.streak?.ladder?.bar?.count { it })
         assertEquals(30, d.streak?.ladder?.bar?.size)
         assertFalse(d.streak!!.atRisk)
-        assertNull(d.streak?.graceEndsAt)
+        assertNull(d.streak.graceEndsAt)
         val rank = (d.rank as RankLine.Ranked).standing
         // national_percentile is already the top bucket: 2 is "Top 2%", never "Top 98%".
         assertEquals("Top 2% nationally", rank.nationalLabel)
@@ -93,8 +93,8 @@ class WireDashboardTest {
         val streak = """{"at_risk":true,"current":5,"grace_ends_at":"2026-11-03T12:00:00Z","ladder":null}"""
         val d = (Rig(scope = backgroundScope) { 200 to ready(streak = streak) }.wire.dashboard() as DashboardState.Ready).dashboard
         assertTrue(d.streak!!.atRisk)
-        assertEquals(2026, d.streak?.graceEndsAt?.year)
-        assertNull(d.streak?.ladder)
+        assertEquals(2026, d.streak.graceEndsAt?.year)
+        assertNull(d.streak.ladder)
     }
 
     @Test fun anOptedOutDonorHasNoRankEvenIfTheServerSentOneAndUnknownFiguresAreNotZero() = runTest {
@@ -134,7 +134,7 @@ class WireDashboardTest {
         assertEquals("Meals on Wheels", initiative.title)
         assertEquals("PROGRAM", initiative.kind)
         assertEquals("2025-01-02", initiative.startedOn)
-        assertEquals(listOf("1200 people", "$4.25", "3"), initiative.headlineMetrics.map { it.valueLabel })
+        assertEquals(listOf("1,200 people", "$4.25", "3"), initiative.headlineMetrics.map { it.valueLabel })
         assertEquals("/donor/me/today-initiative", rig.http.requests.single().path)
         assertTrue(HomeInitiative.ATTRIBUTION_NOTE.contains("display attribution, not designated giving"))
     }
