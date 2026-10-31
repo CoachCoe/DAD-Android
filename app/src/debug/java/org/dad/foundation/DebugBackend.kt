@@ -24,6 +24,7 @@ import okio.Buffer
  * is a 422 `CURRENT_PASSWORD_INCORRECT` (the session stays), a new password under 12 characters a plain 422.
  * Profile/preferences/logout/refresh behave like a live account; account deletion succeeds (200)
  * unless `stub_delete_blocked` (409), after which the account is gone (profile -> 401).
+ * Events (`/donor/me/events`) are scripted by [StubEvents] (`stub_events_invited`, `stub_events_fail_first`, `stub_events_not_eligible`).
  * `stub_signed_in` starts with a stored session. The donor-home reads follow the scenario extras
  * (`stub_dashboard_empty`, `stub_dashboard_fail_first`, `stub_dashboard_unranked`); see [StubDonorHome].
  */
@@ -38,7 +39,7 @@ object DebugBackend {
 
     fun stub(context: Context, scope: CoroutineScope, options: LaunchOptions): AppServices? {
         if (!options.stubBackend) return null
-        val interceptor = StubInterceptor(options.stubDeleteBlocked, options.stubDashboard, options.stubGift)
+        val interceptor = StubInterceptor(options.stubDeleteBlocked, options.stubDashboard, options.stubGift, options.stubEvents)
         val http = OkHttpClient.Builder().addInterceptor(interceptor).build()
         val store = InMemoryCredentialStore(
             if (options.stubSignedIn) Credentials("stub-access-0", "stub-refresh-0-xxxxxxxxxxxxxxxxxxxxxxxxxxxx", Long.MAX_VALUE) else null,
@@ -55,6 +56,7 @@ object DebugBackend {
             passwordSettings = WirePasswordSettings(ProductClient(ORIGIN, session, http)),
             dashboard = WireDashboard(ProductClient(ORIGIN, session, http)),
             giving = GivingKit(WireGiving(ProductClient(ORIGIN, session, http)), stubComplete = interceptor::completeHandoff, pollDelayMs = 200),
+            events = WireEvents(ProductClient(ORIGIN, session, http)),
         )
     }
 }
@@ -65,9 +67,10 @@ class InMemoryCredentialStore(private var value: Credentials? = null) : Credenti
     @Synchronized override fun clear() { value = null }
 }
 
-private class StubInterceptor(private val deletionBlocked: Boolean, scenario: StubDashboard, gift: StubGift) : Interceptor {
+private class StubInterceptor(private val deletionBlocked: Boolean, scenario: StubDashboard, gift: StubGift, eventsScenario: StubEventsScenario) : Interceptor {
     private val home = StubDonorHome(scenario)
     private val giving = StubGiving(gift)
+    private val events = StubEvents(eventsScenario)
     private var generation = 0
     private var deleted = false
     private var version = 3
@@ -146,6 +149,9 @@ private class StubInterceptor(private val deletionBlocked: Boolean, scenario: St
             else -> if (request.url.encodedPath.startsWith("/donor/me/recurring") || request.url.encodedPath.startsWith("/donor/me/payment-method")) {
                 if (!authorized || deleted) reply(401)
                 else giving.answer(request.method, request.url.encodedPath, payload, request.header("Idempotency-Key")).let { (code, json) -> reply(code, json) }
+            } else if (request.url.encodedPath.startsWith("/donor/me/events")) {
+                if (!authorized || deleted) reply(401)
+                else events.answer(request.method, request.url.encodedPath, payload).let { (code, json) -> reply(code, json) }
             } else if (request.method == "GET" && request.url.encodedPath.startsWith("/donor/me/")) {
                 if (!authorized || deleted) reply(401)
                 else home.answer(request.url.encodedPath, request.url.queryParameter("offset")?.toIntOrNull()).let { (code, json) -> reply(code, json) }

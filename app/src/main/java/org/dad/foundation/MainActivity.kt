@@ -149,6 +149,8 @@ class AccountModel(
         private set
     var giving: GivingKit? by mutableStateOf(null)
         private set
+    var events: EventsService? by mutableStateOf(null)
+        private set
     private var loading = false
     private var pendingProof: String? = null
     private var completedProof: String? = null
@@ -169,7 +171,7 @@ class AccountModel(
         try {
             withContext(io) { factory(CoroutineScope(viewModelScope.coroutineContext + io), options) }
                 .also {
-                    services = it; signIn = it.signIn; settings = it.settings; passwordSettings = it.passwordSettings; dashboard = it.dashboard; giving = it.giving
+                    services = it; signIn = it.signIn; settings = it.settings; passwordSettings = it.passwordSettings; dashboard = it.dashboard; giving = it.giving; events = it.events
                     auth = AuthServices(it.signIn, it.signup, it.passwordSignIn, it.external)
                 }
         } catch (cancelled: CancellationException) { throw cancelled }
@@ -313,6 +315,13 @@ class MainActivity : ComponentActivity() {
                 else -> StubGift.NONE
             },
             stubOpenGift = BuildConfig.DEBUG && intent.getBooleanExtra("stub_open_gift", false),
+            stubEvents = when {
+                !BuildConfig.DEBUG -> StubEventsScenario.STANDARD
+                intent.getBooleanExtra("stub_events_invited", false) -> StubEventsScenario.INVITED
+                intent.getBooleanExtra("stub_events_fail_first", false) -> StubEventsScenario.FAIL_FIRST
+                intent.getBooleanExtra("stub_events_not_eligible", false) -> StubEventsScenario.NOT_ELIGIBLE
+                else -> StubEventsScenario.STANDARD
+            },
         )
         val giving = BuildConfig.DEBUG && intent.getBooleanExtra("preview_giving", false)
         val impact = BuildConfig.DEBUG && intent.getBooleanExtra("preview_impact", false)
@@ -351,6 +360,7 @@ class MainActivity : ComponentActivity() {
                             passwordSettings = WirePasswordSettings(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
                             dashboard = WireDashboard(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
                             giving = GivingKit(WireGiving(ProductClient(BuildConfig.DAD_API_ORIGIN, session))),
+                            events = WireEvents(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
                             external = ExternalSignInDeps(
                                 // No Credential Manager provider is linked, so a configured ID alone never switches a method on.
                                 capabilities = SignInCapabilities.of(SignInConfig(BuildConfig.DAD_GOOGLE_WEB_CLIENT_ID, BuildConfig.DAD_PASSKEY_RP_ID)),
@@ -409,7 +419,7 @@ class MainActivity : ComponentActivity() {
                             } else if (network) {
                                 NetworkBadgesHome(viewModel(factory = NetworkBadgesModel.previewFactory()))
                             } else if (events) {
-                                EventsHome(viewModel(factory = EventsModel.previewFactory()))
+                                EventsScreen(viewModel(factory = EventsModel.previewFactory()))
                             } else if (settings) {
                                 SettingsHome(viewModel(factory = SettingsModel.previewFactory()))
                             } else {
@@ -436,9 +446,11 @@ private fun DonorShell(model: AccountModel, openGiftAtLaunch: Boolean = false) {
     var inSettings by rememberSaveable { mutableStateOf(false) }
     var inHistory by rememberSaveable { mutableStateOf(false) }
     var inGift by rememberSaveable { mutableStateOf(openGiftAtLaunch) }
+    var inEvents by rememberSaveable { mutableStateOf(false) }
     val service = model.settings
     val dashboard = model.dashboard
     val kit = model.giving
+    val eventsService = model.events
     // One giving model for the whole signed-in session: the home card, the gift screen and the
     // cancel-before-delete path in Settings all read the same state, so a change shows everywhere at once.
     val giving: GivingModel? = kit?.let { viewModel(key = "giving-${model.generation}", factory = GivingModel.factory(it)) }
@@ -449,6 +461,15 @@ private fun DonorShell(model: AccountModel, openGiftAtLaunch: Boolean = false) {
         BackHandler { inGift = false }
         holder.SaveableStateProvider("gift") {
             GiftScreen(giving, stubComplete = kit.stubComplete, onClose = { inGift = false }, onSignedOut = { inGift = false; model.onSignedOut() })
+        }
+    } else if (inEvents && eventsService != null) {
+        BackHandler { inEvents = false }
+        holder.SaveableStateProvider("events") {
+            EventsScreen(
+                viewModel(key = "events-${model.generation}", factory = EventsModel.factory(eventsService)),
+                onClose = { inEvents = false },
+                onSignedOut = { inEvents = false; model.onSignedOut() },
+            )
         }
     } else if (inHistory && dashboard != null) {
         BackHandler { inHistory = false }
@@ -480,6 +501,7 @@ private fun DonorShell(model: AccountModel, openGiftAtLaunch: Boolean = false) {
                         viewModel(key = "home-${model.generation}", factory = DashboardModel.factory(dashboard)),
                         giving = giving,
                         onOpenGift = { inGift = true },
+                        onOpenEvents = if (eventsService != null) ({ inEvents = true }) else null,
                         onOpenHistory = { inHistory = true },
                         onSignedOut = { model.onSignedOut() },
                     )
@@ -717,90 +739,6 @@ private fun BadgeTile(badge: Badge, modifier: Modifier = Modifier) {
         Text(badge.title, style = MaterialTheme.typography.labelLarge, color = color)
         Text(if (badge.earned) "Earned" else "Locked", style = MaterialTheme.typography.labelSmall, color = color)
         Text(badge.detailLine, style = MaterialTheme.typography.bodySmall)
-    }
-}
-
-
-// Events home (PRD E-1..E-10): the events list (soonest-first, invite-only marked) with an
-// inline reserve/waitlist action per row and inline confirmations — never an OS dialog, per the
-// UITest-determinism lesson. Bound to EventsModel. The camera QR check-in (E-8) is a device seam
-// (CameraPermission in PlatformServices) validated structurally; its logic is unit-tested.
-@Composable
-private fun EventsHome(model: EventsModel) {
-    LaunchedEffect(Unit) { model.load() }
-    var confirmingCancel by rememberSaveable { mutableStateOf<String?>(null) }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .safeDrawingPadding()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp)
-            .testTag("events-home"),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text("Events & volunteering", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
-        when (val phase = model.phase) {
-            is EventsPhase.Loading ->
-                CircularProgressIndicator(modifier = Modifier.testTag("events-loading"))
-            is EventsPhase.Failed ->
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(phase.message, modifier = Modifier.testTag("events-error"))
-                    DadPrimaryButton("Try again") { model.load() }
-                }
-            is EventsPhase.Ready -> {
-                model.actionError?.let { Text(it, modifier = Modifier.testTag("events-action-error")) }
-                // Reserve confirmation (E-4) — inline, after the last reserve action.
-                model.lastOutcome?.let { outcome ->
-                    Column(
-                        modifier = Modifier.testTag("reserve-confirm"),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Text(outcome.confirmationTitle, style = MaterialTheme.typography.titleMedium)
-                        Text(outcome.confirmationDetail, style = MaterialTheme.typography.bodySmall)
-                        Button(onClick = { model.clearOutcome() }) { Text("Done") }
-                    }
-                }
-                model.events.forEach { event -> EventRow(model, event, confirmingCancel) { confirmingCancel = it } }
-            }
-        }
-    }
-}
-
-@Composable
-private fun EventRow(model: EventsModel, event: DonorEvent, confirmingCancel: String?, setConfirming: (String?) -> Unit) {
-    Column(
-        modifier = Modifier.testTag("event-${event.id}"),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Text(event.title, style = MaterialTheme.typography.titleMedium)
-        val starts = remember(event.startsAt) { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(event.startsAt) }
-        Text(starts, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("event-start-${event.id}"))
-        Text("${event.venue} · ${event.spotsLabel}", style = MaterialTheme.typography.bodySmall)
-        if (event.isInviteOnly) {
-            // Invite-only marker (E-5): state in text, not colour alone.
-            Text("Invite only", style = MaterialTheme.typography.labelSmall, modifier = Modifier.testTag("invite-only-${event.id}"))
-        }
-        when (event.availability(Date())) {
-            is EventAvailability.Reservable ->
-                Button(onClick = { model.reserve(event.id) }, modifier = Modifier.testTag("reserve-${event.id}")) { Text("Reserve") }
-            EventAvailability.Waitlistable ->
-                Button(onClick = { model.reserve(event.id) }, modifier = Modifier.testTag("waitlist-${event.id}")) { Text("Join waitlist") }
-            EventAvailability.Reserved, EventAvailability.Waitlisted -> {
-                if (confirmingCancel == event.id) {
-                    // Inline cancel confirmation (no OS dialog).
-                    Column(modifier = Modifier.testTag("cancel-confirm-${event.id}"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Cancel your spot?", style = MaterialTheme.typography.bodyMedium)
-                        Button(onClick = { model.cancel(event.id); setConfirming(null) }) { Text("Give up my spot") }
-                        Button(onClick = { setConfirming(null) }) { Text("Keep it") }
-                    }
-                } else {
-                    Button(onClick = { setConfirming(event.id) }, modifier = Modifier.testTag("cancel-${event.id}")) { Text("Cancel") }
-                }
-            }
-            EventAvailability.CheckedIn -> Text("Checked in", modifier = Modifier.testTag("checkedin-${event.id}"))
-            is EventAvailability.NotYetOpen -> Text("Booking not open yet", style = MaterialTheme.typography.labelSmall)
-            EventAvailability.Cancelled -> Text("Cancelled", modifier = Modifier.testTag("cancelled-${event.id}"))
-        }
     }
 }
 

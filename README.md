@@ -58,8 +58,8 @@ configuration deprecation diagnostics; those upstream warnings are not suppresse
 
 ## Contract, sessions, and transport
 
-`foundation.lock.json` pins the mobile foundation release (currently 2.6.0, tag
-`mobile-foundation-v2.6.0`) and its manifest
+`foundation.lock.json` pins the mobile foundation release (currently 2.7.0, tag
+`mobile-foundation-v2.7.0`) and its manifest
 SHA-256. The vendored release is verified before code generation. The build invokes pinned
 OpenAPI Generator CLI 7.20.0 and generates Retrofit coroutine interfaces and Gson models
 for the operations allow-listed in `scripts/prepare-client.mjs`. No client is generated
@@ -183,3 +183,15 @@ reads are parsed from raw JSON so an unlisted Stripe status (`paused`, `trialing
 No App Link is registered for `/app/return`, so the donor closes the tab to return. Deleting an account with a
 renewing gift (409) offers "Cancel my monthly gift" first. Debug stub extras: `stub_gift_active`,
 `stub_gift_fail_first`, `stub_dashboard_slow`, `stub_open_gift`.
+
+## Events (wiring phase 4, contract 2.7.0)
+
+`WireEvents` merges `donorEvents` and `inviteOnlyEvents` (de-duplicated, soonest first) and drives detail,
+reserve / waitlist, cancel, check-in and the authenticated calendar file. The reads are parsed from raw JSON so
+an unlisted `type`, `reservation_status` or reserve result never fails the list. Times show in the event's own
+`time_zone` with the zone named. Check-in is offered only for a held seat between start and end (no early grace)
+and shows `checked_in_at`; the 66-character token shape is checked before anything is sent. "Scan QR code" opens
+the system camera app and reads the photo with ZXing core (already a dependency for the invite QR), so there is
+no camera permission and no scanner library; typing the code always works. "Add to calendar" shares the `.ics`
+through a FileProvider URI and the share sheet (no calendar permission). The contract defines no Idempotency-Key
+for these commands. Debug stub extras: `stub_events_invited`, `stub_events_fail_first`, `stub_events_not_eligible`.
