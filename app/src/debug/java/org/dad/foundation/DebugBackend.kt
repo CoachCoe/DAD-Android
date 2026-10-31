@@ -24,6 +24,8 @@ import okio.Buffer
  * is a 422 `CURRENT_PASSWORD_INCORRECT` (the session stays), a new password under 12 characters a plain 422.
  * Profile/preferences/logout/refresh behave like a live account; account deletion succeeds (200)
  * unless `stub_delete_blocked` (409), after which the account is gone (profile -> 401).
+ * `stub_signed_in` starts with a stored session. The donor-home reads follow the scenario extras
+ * (`stub_dashboard_empty`, `stub_dashboard_fail_first`, `stub_dashboard_unranked`); see [StubDonorHome].
  */
 object DebugBackend {
     const val ORIGIN = "https://stub.invalid"
@@ -32,8 +34,10 @@ object DebugBackend {
 
     fun stub(context: Context, scope: CoroutineScope, options: LaunchOptions): AppServices? {
         if (!options.stubBackend) return null
-        val http = OkHttpClient.Builder().addInterceptor(StubInterceptor(options.stubDeleteBlocked)).build()
-        val store = InMemoryCredentialStore()
+        val http = OkHttpClient.Builder().addInterceptor(StubInterceptor(options.stubDeleteBlocked, options.stubDashboard)).build()
+        val store = InMemoryCredentialStore(
+            if (options.stubSignedIn) Credentials("stub-access-0", "stub-refresh-0-xxxxxxxxxxxxxxxxxxxxxxxxxxxx", Long.MAX_VALUE) else null,
+        )
         val session = AccountSession(WireAPI(ORIGIN, http), store, scope)
         val attribution = PrefsAttributionStore(context.applicationContext)
         val credentialAuth = WireCredentialAuth(ORIGIN, "Stub device", http)
@@ -44,6 +48,7 @@ object DebugBackend {
             signup = credentialAuth,
             passwordSignIn = credentialAuth,
             passwordSettings = WirePasswordSettings(ProductClient(ORIGIN, session, http)),
+            dashboard = WireDashboard(ProductClient(ORIGIN, session, http)),
         )
     }
 }
@@ -54,7 +59,8 @@ class InMemoryCredentialStore(private var value: Credentials? = null) : Credenti
     @Synchronized override fun clear() { value = null }
 }
 
-private class StubInterceptor(private val deletionBlocked: Boolean) : Interceptor {
+private class StubInterceptor(private val deletionBlocked: Boolean, scenario: StubDashboard) : Interceptor {
+    private val home = StubDonorHome(scenario)
     private var generation = 0
     private var deleted = false
     private var version = 3
@@ -126,7 +132,10 @@ private class StubInterceptor(private val deletionBlocked: Boolean) : Intercepto
                 else -> { deleted = true; reply(200, """{"deleted":true}""") }
             }
             "POST" to "/donor/logout" -> reply(200, """{"signed_out":true}""")
-            else -> reply(404)
+            else -> if (request.method == "GET" && request.url.encodedPath.startsWith("/donor/me/")) {
+                if (!authorized || deleted) reply(401)
+                else home.answer(request.url.encodedPath, request.url.queryParameter("offset")?.toIntOrNull()).let { (code, json) -> reply(code, json) }
+            } else reply(404)
         }
     }
 }
