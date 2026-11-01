@@ -35,34 +35,34 @@ class CredentialAuthFlowTest {
     private fun absent(tag: String) = compose.onAllNodes(hasTestTag(tag)).fetchSemanticsNodes().isEmpty()
 
     private fun type(tag: String, text: String) {
-        compose.onNodeWithTag(tag).performScrollTo().performTextInput(text)
+        compose.enterText(tag, text)
         compose.waitForIdle()
     }
 
     private fun openMethods() {
         waitFor("role-donor")
-        compose.onNodeWithTag("role-donor").performClick()
+        compose.tapSafely("role-donor")
         waitFor("sign-in-methods")
     }
 
     private fun fillSignup(email: String = "new.donor@example.org") {
         openMethods()
-        compose.onNodeWithTag("method-signup").performScrollTo().performClick()
+        compose.tapSafely("method-signup")
         waitFor("signup")
         type("signup-name", "Alex Doe")
         type("signup-email", email)
         type("signup-zip", "78701")
         type("signup-city", "Austin")
-        compose.onNodeWithTag("signup-submit").performScrollTo().performClick()
+        compose.tapSafely("signup-submit")
     }
 
     private fun passwordSignIn(email: String, password: String) {
         openMethods()
-        compose.onNodeWithTag("method-password").performScrollTo().performClick()
+        compose.tapSafely("method-password")
         waitFor("password-sign-in")
         type("password-email", email)
         type("password-input", password)
-        compose.onNodeWithTag("password-submit").performScrollTo().performClick()
+        compose.tapSafely("password-submit")
     }
 
     @Test fun newDonorSignsUpThenClaimsAPastedLinkAndLandsInTheDonorShell() {
@@ -71,7 +71,7 @@ class CredentialAuthFlowTest {
             waitFor("check-email")
             compose.onNodeWithTag("check-email-address").assertIsDisplayed()
             type("paste-input", "https://stub.invalid/account/claim#token=good" + "A".repeat(40))
-            compose.onNodeWithTag("paste-submit").performScrollTo().performClick()
+            compose.tapSafely("paste-submit")
             waitFor("open-settings")
         }
     }
@@ -81,7 +81,7 @@ class CredentialAuthFlowTest {
             fillSignup()
             waitFor("check-email")
             type("paste-input", "https://example.com/not-dad")
-            compose.onNodeWithTag("paste-submit").performScrollTo().performClick()
+            compose.tapSafely("paste-submit")
             waitFor("paste-error")
             assertTrue(absent("open-settings"))
         }
@@ -92,7 +92,7 @@ class CredentialAuthFlowTest {
             fillSignup()
             waitFor("check-email")
             type("paste-input", "https://stub.invalid/account/claim#token=stale" + "B".repeat(40))
-            compose.onNodeWithTag("paste-submit").performScrollTo().performClick()
+            compose.tapSafely("paste-submit")
             waitFor("check-email-notice")
             assertTrue(absent("open-settings"))
         }
@@ -133,7 +133,7 @@ class CredentialAuthFlowTest {
     private fun openPasswordSettings() {
         passwordSignIn("alex@example.org", "correct-horse-battery")
         waitFor("open-settings")
-        compose.onNodeWithTag("open-settings").performClick()
+        compose.tapSafely("open-settings")
         waitFor("pw-save")
     }
 
@@ -143,7 +143,7 @@ class CredentialAuthFlowTest {
             type("pw-current", "correct-horse-battery")
             type("pw-new", "a-brand-new-password")
             type("pw-confirm", "a-brand-new-password")
-            compose.onNodeWithTag("pw-save").performScrollTo().performClick()
+            compose.tapSafely("pw-save")
             waitFor("pw-saved")
             compose.onNodeWithTag("settings-signout").performScrollTo().assertExists()
         }
@@ -155,7 +155,7 @@ class CredentialAuthFlowTest {
             type("pw-current", "wrong-current-password")
             type("pw-new", "a-brand-new-password")
             type("pw-confirm", "a-brand-new-password")
-            compose.onNodeWithTag("pw-save").performScrollTo().performClick()
+            compose.tapSafely("pw-save")
             waitFor("pw-error")
             compose.onNodeWithTag("settings-signout").performScrollTo().assertExists()
             assertTrue(absent("role-donor"))

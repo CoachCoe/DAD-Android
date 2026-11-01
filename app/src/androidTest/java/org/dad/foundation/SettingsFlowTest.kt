@@ -49,7 +49,7 @@ class SettingsFlowTest {
         launch().use {
             compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("ranking-toggle")).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("ranking-toggle").performScrollTo().assertIsOn()
-            compose.onNodeWithTag("ranking-toggle").performClick()
+            compose.tapSafely("ranking-toggle")
             compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("ranking-toggle") and isOff()).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("ranking-toggle").assertIsOff()
         }
@@ -58,11 +58,11 @@ class SettingsFlowTest {
     @Test fun deleteGateStaysDisabledUntilConfirmWordTyped() {
         launch().use {
             compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("settings-home")).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("delete-start").performScrollTo().performClick()
+            compose.tapSafely("delete-start")
             compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("delete-confirm")).fetchSemanticsNodes().isNotEmpty() }
             // Disabled with no / wrong text.
             compose.onNodeWithTag("delete-confirm").performScrollTo().assertIsNotEnabled()
-            compose.onNodeWithTag("delete-input").performScrollTo().performTextInput("DELETE")
+            compose.enterText("delete-input", "DELETE")
             // Enabled once the exact word is present.
             compose.onNodeWithTag("delete-confirm").performScrollTo().assertIsEnabled()
         }
@@ -71,7 +71,7 @@ class SettingsFlowTest {
     @Test fun signOutLeavesTheShell() {
         launch().use {
             compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("settings-signout")).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("settings-signout").performScrollTo().performClick()
+            compose.tapSafely("settings-signout")
             compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("settings-signed-out")).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("settings-signed-out").assertIsDisplayed()
         }

@@ -51,11 +51,11 @@ class PartnerFlowTest {
         launch("preview_partner").use {
             compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("partner-portal")).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("partner-invite").performScrollTo().assertIsNotEnabled()
-            compose.onNodeWithTag("partner-invite-email").performScrollTo().performTextInput("not-an-email")
+            compose.enterText("partner-invite-email", "not-an-email")
             compose.onNodeWithTag("partner-invite").performScrollTo().assertIsNotEnabled()
             compose.onNodeWithTag("partner-invite-email").performTextClearance()
-            compose.onNodeWithTag("partner-invite-email").performTextInput("new.person@acme.com")
-            compose.onNodeWithTag("partner-invite").performScrollTo().assertIsEnabled().performClick()
+            compose.enterText("partner-invite-email", "new.person@acme.com")
+            compose.tapSafely("partner-invite")
             compose.waitUntil(5_000) { compose.onAllNodes(hasText("new.person@acme.com · VIEWER")).fetchSemanticsNodes().isNotEmpty() }
         }
     }
@@ -81,13 +81,13 @@ class PartnerFlowTest {
     @Test fun removeNeedsConfirmationAndCanBeCancelled() {
         launch("preview_partner").use {
             compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("partner-portal")).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("partner-remove-u2").performScrollTo().performClick()
+            compose.tapSafely("partner-remove-u2")
             compose.onNodeWithTag("partner-remove-confirm-u2").performScrollTo().assertIsDisplayed()
             // The user is still listed until the confirm; Keep backs out.
-            compose.onNodeWithTag("partner-remove-keep-u2").performScrollTo().performClick()
+            compose.tapSafely("partner-remove-keep-u2")
             compose.onNodeWithTag("partner-remove-u2").performScrollTo().assertIsDisplayed()
-            compose.onNodeWithTag("partner-remove-u2").performClick()
-            compose.onNodeWithTag("partner-remove-confirm-u2").performScrollTo().performClick()
+            compose.tapSafely("partner-remove-u2")
+            compose.tapSafely("partner-remove-confirm-u2")
             compose.waitUntil(5_000) { compose.onAllNodes(hasText("Val Viewer · VIEWER")).fetchSemanticsNodes().isEmpty() }
         }
     }

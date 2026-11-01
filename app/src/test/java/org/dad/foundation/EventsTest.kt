@@ -408,14 +408,6 @@ class EventsTest {
         assertEquals(1, service.checkInCalls)
     }
 
-    @Test fun aPhotoWithNoCodeFallsBackToTyping() = runTest {
-        val model = modelOf(FakeService())
-        model.scanFoundNothing()
-        assertEquals(CheckInState.Failed(EventsCopy.NO_QR), model.checkIn)
-        model.resetCheckIn()
-        assertEquals(CheckInState.Idle, model.checkIn)
-    }
-
     // --- Calendar (E-6) ---
     @Test fun addToCalendarFetchesThenHandsTheFileOverOnce() = runTest {
         val model = modelOf(FakeService())

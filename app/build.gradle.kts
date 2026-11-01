@@ -138,6 +138,13 @@ dependencies {
     // R-1/R-2: QR generation for the IRL invite code. Pure-JVM core so the encode/decode
     // round-trip is a unit test (no emulator).
     implementation("com.google.zxing:core:3.5.3")
+    // E-8: live QR scanning for event check-in. CameraX drives the viewfinder; ML Kit's BUNDLED barcode model
+    // (not the Play Services one) decodes, so the first scan works offline with no model download.
+    implementation("androidx.camera:camera-core:1.6.2")
+    implementation("androidx.camera:camera-camera2:1.6.2")
+    implementation("androidx.camera:camera-lifecycle:1.6.2")
+    implementation("androidx.camera:camera-view:1.6.2")
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
