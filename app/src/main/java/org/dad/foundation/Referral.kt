@@ -13,14 +13,14 @@ import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 object Referral {
     /**
      * Build the canonical invite URL for a referral code against the public origin.
-     * Returns null for a malformed origin or a code that fails attribution sanitization, so a
+     * Matches the server route `/r/<code>` (`?via=irl` for the in-person variant). Returns null for a malformed origin or a code that fails attribution sanitization, so a
      * bad code can never produce a sharable-but-broken link.
      */
-    fun inviteLink(publicOrigin: String, code: String): String? {
+    fun inviteLink(publicOrigin: String, code: String, inPerson: Boolean = false): String? {
         val sanitized = Attribution.sanitized(code) ?: return null
         val origin = publicOrigin.trimEnd('/')
         if (!origin.startsWith("https://") || origin.length < "https://a".length) return null
-        return "$origin/invite?ref=$sanitized"
+        return "$origin/r/$sanitized" + if (inPerson) "?via=irl" else ""
     }
 
     /**
