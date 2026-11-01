@@ -40,30 +40,30 @@ class StubBackendFlowTest {
 
     private fun signIn(code: String) {
         waitFor("role-donor")
-        compose.onNodeWithTag("role-donor").performClick()
+        compose.tapSafely("role-donor")
         waitFor("method-phone")
-        compose.onNodeWithTag("method-phone").performClick()
+        compose.tapSafely("method-phone")
         waitFor("phone-input")
-        compose.onNodeWithTag("phone-input").performTextInput("+14155551234")
+        compose.enterText("phone-input", "+14155551234")
         compose.waitForIdle()
         waitEnabled("send-code")
-        compose.onNodeWithTag("send-code").performClick()
+        compose.tapSafely("send-code")
         waitFor("code-input")
-        compose.onNodeWithTag("code-input").performTextInput(code)
+        compose.enterText("code-input", code)
         compose.waitForIdle()
         waitEnabled("verify-code")
-        compose.onNodeWithTag("verify-code").performClick()
+        compose.tapSafely("verify-code")
     }
 
     private fun deleteAccount() {
         waitFor("open-settings")
-        compose.onNodeWithTag("open-settings").performClick()
+        compose.tapSafely("open-settings")
         waitFor("delete-start")
-        compose.onNodeWithTag("delete-start").performScrollTo().performClick()
+        compose.tapSafely("delete-start")
         waitFor("delete-input")
-        compose.onNodeWithTag("delete-input").performScrollTo().performTextInput("DELETE")
+        compose.enterText("delete-input", "DELETE")
         compose.waitForIdle()
-        compose.onNodeWithTag("delete-confirm").performScrollTo().performClick()
+        compose.tapSafely("delete-confirm")
     }
 
     @Test fun signInThenDeleteAccountReturnsToSignIn() {
@@ -106,9 +106,9 @@ class StubBackendFlowTest {
         launch().use {
             signIn("123456")
             waitFor("open-settings")
-            compose.onNodeWithTag("open-settings").performClick()
+            compose.tapSafely("open-settings")
             waitFor("settings-signout")
-            compose.onNodeWithTag("settings-signout").performScrollTo().performClick()
+            compose.tapSafely("settings-signout")
             waitFor("role-donor")
         }
     }
@@ -116,7 +116,7 @@ class StubBackendFlowTest {
     @Test fun partnerSignInIsAnHonestNotice() {
         launch().use {
             waitFor("role-partner")
-            compose.onNodeWithTag("role-partner").performClick()
+            compose.tapSafely("role-partner")
             waitFor("partner-sign-in-notice")
             compose.onNodeWithTag("partner-sign-in-notice").assertIsDisplayed()
         }

@@ -3,11 +3,7 @@ package org.dad.foundation
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -58,8 +54,8 @@ import java.util.Date
 
 // Events screens (PRD E-1..E-10): the list, an event's detail with reserve / waitlist / cancel, check-in by
 // typed or scanned code, add-to-calendar and report-an-issue, bound to [EventsModel]. Every confirmation is
-// inline (no OS dialog) so it is deterministic to test. Scanning uses the system camera app and ZXing core
-// (see [QrDecoder]), so no camera permission is requested and no scanner library is added; typing the code
+// inline (no OS dialog) so it is deterministic to test. Scanning is a live CameraX + ML Kit viewfinder (see
+// [ScanQrSection]); the camera permission is asked only when the donor taps "Scan QR code", and typing the code
 // always works.
 
 /** The events section: the list, with the open event's detail on top of it. */
@@ -238,7 +234,7 @@ private fun CheckInSection(model: EventsModel, event: DonorEvent, now: Date) {
             modifier = Modifier.fillMaxWidth().testTag("checkin-code"),
         )
         DadPrimaryButton(if (checking) "Checking in…" else "Check in", Modifier.testTag("checkin-submit")) { if (!checking) model.checkIn(event, code) }
-        ScanQrButton(model, event, enabled = !checking)
+        ScanQrSection(enabled = !checking, onToken = { model.checkIn(event, it) }, onScanStarted = { model.resetCheckIn() })
         when (state) {
             is CheckInState.Done -> Text(
                 if (state.alreadyCheckedIn) "You were already checked in." else "You’re checked in. Thank you for coming.",
@@ -247,54 +243,6 @@ private fun CheckInSection(model: EventsModel, event: DonorEvent, now: Date) {
             is CheckInState.Failed -> Text(state.message, modifier = Modifier.testTag("checkin-error").semantics { liveRegion = LiveRegionMode.Polite })
             else -> Unit
         }
-    }
-}
-
-/**
- * "Scan QR code": hands the camera to the system camera app (no CAMERA permission is needed or requested, and
- * no scanner library is linked) and reads the photo with ZXing core. A device with no camera app, or a photo
- * with no code in it, falls back to typing the code.
- */
-@Composable
-private fun ScanQrButton(model: EventsModel, event: DonorEvent, enabled: Boolean) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val photo = remember(context) { sharedFile(context, "scan", "scan.jpg") }
-    val capture = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { taken ->
-        if (!taken) return@rememberLauncherForActivityResult
-        scope.launch {
-            val text = withContext(Dispatchers.Default) { readQr(photo) }
-            withContext(Dispatchers.Main) { if (text == null) model.scanFoundNothing() else model.checkIn(event, text) }
-            photo.delete()
-        }
-    }
-    OutlinedButton(
-        onClick = {
-            try {
-                capture.launch(FileProvider.getUriForFile(context, fileAuthority(context), photo))
-            } catch (_: ActivityNotFoundException) {
-                model.scanFoundNothing()
-            }
-        },
-        enabled = enabled,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("checkin-scan"),
-    ) { Text("Scan QR code") }
-}
-
-/** Decode a photo at a size ZXing handles well; the full-resolution frame is never held in memory. */
-private fun readQr(file: File): String? {
-    if (!file.exists() || file.length() == 0L) return null
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeFile(file.path, bounds)
-    var sample = 1
-    while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 2048) sample *= 2
-    val bitmap: Bitmap = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
-    return try {
-        val pixels = IntArray(bitmap.width * bitmap.height)
-        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-        QrDecoder.decode(bitmap.width, bitmap.height, pixels)
-    } finally {
-        bitmap.recycle()
     }
 }
 

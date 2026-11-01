@@ -66,10 +66,10 @@ class NetworkBadgesFlowTest {
             compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("sharing-optin")).fetchSemanticsNodes().isNotEmpty() }
             // No name typed yet: opting in is disabled.
             compose.onNodeWithTag("sharing-optin").performScrollTo().assertIsNotEnabled()
-            compose.onNodeWithTag("sharing-name").performScrollTo().performTextInput("Alex C.")
+            compose.enterText("sharing-name", "Alex C.")
             compose.onNodeWithTag("sharing-optin").performScrollTo().assertIsEnabled()
             // Opt in — inline, deterministic (no dialog): the share link appears.
-            compose.onNodeWithTag("sharing-optin").performClick()
+            compose.tapSafely("sharing-optin")
             compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("sharing-link")).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("sharing-link").performScrollTo().assertIsDisplayed()
         }

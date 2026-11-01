@@ -190,8 +190,10 @@ renewing gift (409) offers "Cancel my monthly gift" first. Debug stub extras: `s
 reserve / waitlist, cancel, check-in and the authenticated calendar file. The reads are parsed from raw JSON so
 an unlisted `type`, `reservation_status` or reserve result never fails the list. Times show in the event's own
 `time_zone` with the zone named. Check-in is offered only for a held seat between start and end (no early grace)
-and shows `checked_in_at`; the 66-character token shape is checked before anything is sent. "Scan QR code" opens
-the system camera app and reads the photo with ZXing core (already a dependency for the invite QR), so there is
-no camera permission and no scanner library; typing the code always works. "Add to calendar" shares the `.ics`
+and shows `checked_in_at`; the 66-character token shape is checked before anything is sent. "Scan QR code" asks for
+the camera permission only when tapped, then shows a live CameraX viewfinder decoded by ML Kit's bundled
+QR model (works offline; ZXing core remains for generating the invite QR). The first well-formed token checks in
+once; other codes show a hint and scanning continues. Denied or unavailable camera falls back to typing the code,
+which is always on screen. Live capture is device-only; tests use a fake scanner source. "Add to calendar" shares the `.ics`
 through a FileProvider URI and the share sheet (no calendar permission). The contract defines no Idempotency-Key
 for these commands. Debug stub extras: `stub_events_invited`, `stub_events_fail_first`, `stub_events_not_eligible`.

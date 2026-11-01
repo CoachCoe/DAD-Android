@@ -11,8 +11,6 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
@@ -41,12 +39,7 @@ class GiftFlowTest {
     private fun exists(tag: String) = compose.onAllNodes(hasTestTag(tag)).fetchSemanticsNodes().isNotEmpty()
     private fun waitFor(tag: String, timeout: Long = 20_000) = compose.waitUntil(timeout) { exists(tag) }
     private fun waitGone(tag: String, timeout: Long = 20_000) = compose.waitUntil(timeout) { !exists(tag) }
-    private fun tap(tag: String) {
-        waitFor(tag)
-        compose.waitUntil(15_000) { runCatching { compose.onNodeWithTag(tag).assertIsEnabled() }.isSuccess }
-        // A click on a node clipped out of the viewport is dropped without an error; fail here, at the cause, instead.
-        compose.onNodeWithTag(tag).performScrollTo().assertIsDisplayed().performClick()
-    }
+    private fun tap(tag: String) = compose.tapSafely(tag)
 
     /** Wait for the home gift card to finish loading, then open the gift screen from it. */
     private fun openGift() {
@@ -173,42 +166,18 @@ class GiftFlowTest {
         }
     }
 
-    /**
-     * Wait until the settings layout has taken the keyboard's FINAL height. The keyboard's inset animation is run by
-     * the system, not the Compose clock, so waitForIdle does not cover it: on a slow emulator it is still running when
-     * the next tap starts. performScrollTo then lines "Permanently delete" up with the bottom of a viewport that keeps
-     * shrinking, the button ends up clipped under the keyboard, and the click is silently dropped (no request, no
-     * error). Ready means the viewport's bottom sits exactly at the window height minus the settled bottom inset.
-     */
-    private fun awaitKeyboardSettled(scenario: ActivityScenario<MainActivity>) {
-        compose.waitUntil(20_000) {
-            var limit = -1f
-            scenario.onActivity { activity ->
-                val decor = activity.window.decorView
-                val insets = ViewCompat.getRootWindowInsets(decor)
-                if (insets != null && insets.isVisible(WindowInsetsCompat.Type.ime())) {
-                    val types = WindowInsetsCompat.Type.ime() or WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
-                    limit = (decor.height - insets.getInsets(types).bottom).toFloat()
-                }
-            }
-            limit > 0 && Math.abs(compose.onNodeWithTag("settings-home").fetchSemanticsNode().boundsInRoot.bottom - limit) < 1f
-        }
-        compose.waitForIdle()
-    }
-
-    private fun startDeleting(scenario: ActivityScenario<MainActivity>) {
+    private fun startDeleting() {
         waitFor("open-settings")
         compose.waitUntil(20_000) { !exists("dashboard-loading") && !exists("initiative-loading") }
         tap("open-settings")
         tap("delete-start")
         waitFor("delete-input")
-        compose.onNodeWithTag("delete-input").performScrollTo().performTextInput("DELETE")
-        awaitKeyboardSettled(scenario)
+        compose.enterText("delete-input", "DELETE")
     }
 
     @Test fun deleteAccountWithAnActiveGiftOffersTheCancelFlowThenDeletes() {
-        launch("stub_gift_active").use { scenario ->
-            startDeleting(scenario)
+        launch("stub_gift_active").use {
+            startDeleting()
             tap("delete-confirm")
             // The server refuses (409): the screen explains and offers the real cancel flow.
             waitFor("settings-action-error")
@@ -229,8 +198,8 @@ class GiftFlowTest {
     }
 
     @Test fun deleteWithNoGiftStillJustDeletes() {
-        launch().use { scenario ->
-            startDeleting(scenario)
+        launch().use {
+            startDeleting()
             tap("delete-confirm")
             waitFor("role-donor")
             assertTrue(!exists("delete-cancel-gift"))

@@ -40,11 +40,7 @@ class EventsWiredFlowTest {
     private fun exists(tag: String) = compose.onAllNodes(hasTestTag(tag)).fetchSemanticsNodes().isNotEmpty()
     private fun waitFor(tag: String, timeout: Long = 20_000) = compose.waitUntil(timeout) { exists(tag) }
     private fun waitGone(tag: String, timeout: Long = 20_000) = compose.waitUntil(timeout) { !exists(tag) }
-    private fun tap(tag: String) {
-        waitFor(tag)
-        compose.waitUntil(15_000) { runCatching { compose.onNodeWithTag(tag).assertIsEnabled() }.isSuccess }
-        compose.onNodeWithTag(tag).performScrollTo().performClick()
-    }
+    private fun tap(tag: String) = compose.tapSafely(tag)
     private fun textOf(tag: String, text: String) = compose.waitUntil(20_000) {
         runCatching { compose.onNodeWithTag(tag).assertTextContains(text, substring = true) }.isSuccess
     }
@@ -134,18 +130,18 @@ class EventsWiredFlowTest {
             openEvent(StubEvents.LIVE)
             waitFor("checkin-code")
             // A wrong (well formed) code is refused with the reason, and nothing is checked in.
-            compose.onNodeWithTag("checkin-code").performScrollTo().performTextInput(StubEvents.WRONG_TOKEN)
+            compose.enterText("checkin-code", StubEvents.WRONG_TOKEN)
             tap("checkin-submit")
             waitFor("checkin-error")
             textOf("checkin-error", "didn’t work")
             // A malformed code never reaches the server.
             val before = DebugBackend.requestLog.count { it == "POST /donor/me/events/check-in" }
-            compose.onNodeWithTag("checkin-code").performScrollTo().performTextReplacement("short")
+            compose.enterText("checkin-code", "short", replace = true)
             tap("checkin-submit")
             textOf("checkin-error", "66 characters")
             assertTrue(before == DebugBackend.requestLog.count { it == "POST /donor/me/events/check-in" })
             // The real code checks in.
-            compose.onNodeWithTag("checkin-code").performScrollTo().performTextReplacement(StubEvents.TOKEN)
+            compose.enterText("checkin-code", StubEvents.TOKEN, replace = true)
             tap("checkin-submit")
             waitFor("checkedin-${StubEvents.LIVE}")
             waitGone("checkin-code")

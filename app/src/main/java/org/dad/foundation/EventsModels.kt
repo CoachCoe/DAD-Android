@@ -69,7 +69,6 @@ internal object EventsCopy {
     const val BAD_SHAPE = "That doesn’t look like an event check-in code. It is 66 characters long."
     const val CODE_REFUSED = "That code didn’t work. Check that you hold a seat, the event is under way, and the code is the one shown at the event."
     const val WRONG_EVENT = "That code is for a different event."
-    const val NO_QR = "We couldn’t read a QR code in that photo. Try again, or type the code."
     const val NOT_HELD = "Check-in is for donors who hold a seat. Waitlisted places can’t check in."
 
     fun general(error: Exception): String = when (error) {
@@ -218,7 +217,6 @@ class EventsModel(private val service: EventsService, private val clock: () -> D
     }
 
     /** A photo that held no readable QR code. */
-    fun scanFoundNothing() { checkIn = CheckInState.Failed(EventsCopy.NO_QR) }
     fun resetCheckIn() { if (!checkInFlight) checkIn = CheckInState.Idle }
 
     private fun notOpenReason(event: DonorEvent): String = when {
