@@ -141,7 +141,7 @@ class AccountModel(
     // must recompose when they arrive (otherwise Settings and the donor home never appear).
     var settings: SettingsService? by mutableStateOf(null)
         private set
-    var auth: AuthServices = AuthServices(UnconfiguredSignIn, UnconfiguredCredentialAuth, UnconfiguredCredentialAuth, ExternalSignInDeps())
+    var auth: AuthServices = AuthServices(UnconfiguredSignIn, UnconfiguredCredentialAuth, UnconfiguredCredentialAuth, UnconfiguredCredentialAuth, ExternalSignInDeps())
         private set
     var passwordSettings: PasswordSettingsService? by mutableStateOf(null)
         private set
@@ -152,6 +152,10 @@ class AccountModel(
     var events: EventsService? by mutableStateOf(null)
         private set
     var engagement: EngagementService? by mutableStateOf(null)
+        private set
+    var management: AccountManagementService? by mutableStateOf(null)
+        private set
+    var wallet: WalletPassService? by mutableStateOf(null)
         private set
     private var loading = false
     private var pendingProof: String? = null
@@ -174,7 +178,8 @@ class AccountModel(
             withContext(io) { factory(CoroutineScope(viewModelScope.coroutineContext + io), options) }
                 .also {
                     services = it; signIn = it.signIn; settings = it.settings; passwordSettings = it.passwordSettings; dashboard = it.dashboard; giving = it.giving; events = it.events; engagement = it.engagement
-                    auth = AuthServices(it.signIn, it.signup, it.passwordSignIn, it.external)
+                    management = it.management; wallet = it.wallet
+                    auth = AuthServices(it.signIn, it.signup, it.signInLink, it.passwordSignIn, it.external)
                 }
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) {
@@ -371,12 +376,15 @@ class MainActivity : ComponentActivity() {
                             WireAuth(BuildConfig.DAD_API_ORIGIN, android.os.Build.MODEL),
                             WireSettings(ProductClient(BuildConfig.DAD_API_ORIGIN, session), onLocalWipe = { attribution.clear() }),
                             signup = credentialAuth,
+                            signInLink = credentialAuth,
                             passwordSignIn = credentialAuth,
                             passwordSettings = WirePasswordSettings(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
                             dashboard = WireDashboard(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
                             giving = GivingKit(WireGiving(ProductClient(BuildConfig.DAD_API_ORIGIN, session))),
                             events = WireEvents(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
                             engagement = WireEngagement(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
+                            management = WireAccountManagement(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
+                            wallet = WireWalletPass(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
                             external = ExternalSignInDeps(
                                 // No Credential Manager provider is linked, so a configured ID alone never switches a method on.
                                 capabilities = SignInCapabilities.of(SignInConfig(BuildConfig.DAD_GOOGLE_WEB_CLIENT_ID, BuildConfig.DAD_PASSKEY_RP_ID)),
@@ -511,6 +519,7 @@ private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaun
                 sharer = remember { ReferralShareAction(AndroidReferralSharer(context)) },
                 onClose = { inEngagement = false },
                 onSignedOut = { inEngagement = false; model.onSignedOut() },
+                wallet = model.wallet?.let { viewModel<WalletPassModel>(key = "wallet-${model.generation}", factory = WalletPassModel.factory(it)) },
             )
         }
     } else if (inEvents && eventsService != null) {
@@ -542,6 +551,8 @@ private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaun
                     viewModel<PasswordChangeModel>(key = "password-${model.generation}", factory = PasswordChangeModel.factory(passwordService))
                 },
                 onCancelGift = if (giving != null) ({ inGift = true }) else null,
+                management = model.management,
+                generation = model.generation,
             )
         }
     } else {
@@ -607,7 +618,7 @@ private fun DonorLanding(model: AccountModel, onSettings: (() -> Unit)? = null, 
 @Composable
 private fun SettingsHome(
     model: SettingsModel, onBack: (() -> Unit)? = null, onSignedOut: (() -> Unit)? = null, password: PasswordChangeModel? = null,
-    onCancelGift: (() -> Unit)? = null,
+    onCancelGift: (() -> Unit)? = null, management: AccountManagementService? = null, generation: Int = 0,
 ) {
     LaunchedEffect(Unit) { model.load() }
     LaunchedEffect(model.signedOut) { if (model.signedOut) onSignedOut?.invoke() }
@@ -640,7 +651,7 @@ private fun SettingsHome(
             is SettingsPhase.Ready -> model.snapshot?.let { snapshot ->
                 SettingsContent(model, snapshot, confirmingDelete, deleteTyped,
                     onConfirmingChange = { confirmingDelete = it }, onTypedChange = { deleteTyped = it }, password = password,
-                    onCancelGift = onCancelGift)
+                    onCancelGift = onCancelGift, management = management, generation = generation, onSignedOut = onSignedOut)
             }
         }
         model.actionError?.let { Text(it, modifier = Modifier.testTag("settings-action-error")) }
@@ -651,12 +662,16 @@ private fun SettingsHome(
 private fun SettingsContent(
     model: SettingsModel, snapshot: SettingsSnapshot, confirmingDelete: Boolean, deleteTyped: String,
     onConfirmingChange: (Boolean) -> Unit, onTypedChange: (String) -> Unit, password: PasswordChangeModel? = null,
-    onCancelGift: (() -> Unit)? = null,
+    onCancelGift: (() -> Unit)? = null, management: AccountManagementService? = null, generation: Int = 0, onSignedOut: (() -> Unit)? = null,
 ) {
     // Profile header — role is immutable (D-1), ZIP drives streak day rollover.
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(snapshot.profile.email, style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("settings-email"))
-        Text("ZIP: ${snapshot.profile.zipLabel}", style = MaterialTheme.typography.bodySmall)
+        if (management == null) Text("ZIP: ${snapshot.profile.zipLabel}", style = MaterialTheme.typography.bodySmall)
+    }
+    if (management != null) {
+        EmailChangeSection(viewModel(key = "email-change-$generation", factory = EmailChangeModel.factory(snapshot.profile.email, management)))
+        ProfileDetailsSection(viewModel(key = "details-$generation", factory = ProfileDetailsModel.factory(snapshot.profile, management)))
     }
 
     // Notification toggles (§6.11) — email then push categories. Payment-failure email is absent
@@ -679,6 +694,11 @@ private fun SettingsContent(
     }
 
     password?.let { PasswordSection(it) }
+
+    if (management != null) {
+        EmployerSection(viewModel(key = "employer-$generation", factory = EmployerModel.factory(management)))
+        SessionsSection(viewModel(key = "sessions-$generation", factory = DeviceSessionsModel.factory(management))) { onSignedOut?.invoke() }
+    }
 
     // Sign out.
     Button(onClick = { model.signOut() }, modifier = Modifier.testTag("settings-signout")) { Text("Sign out") }

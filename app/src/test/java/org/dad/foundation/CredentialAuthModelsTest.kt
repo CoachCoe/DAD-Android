@@ -49,6 +49,40 @@ class CredentialAuthModelsTest {
         listOf("7870", "787011", "7870a", "", "78 701").forEach { assertFalse(it, CredentialRules.isPlausibleZip(it)) }
     }
 
+    // MARK: sign-in link
+
+    private class FakeLink(var failure: Exception? = null) : SignInLinkService {
+        val emails = mutableListOf<String>()
+        override suspend fun requestSignInLink(email: String) { emails += email; failure?.let { throw it } }
+    }
+
+    @Test fun signInLinkSendsTheTrimmedAddressOnlyWhenPlausible() {
+        val service = FakeLink()
+        val model = SignInLinkModel(service)
+        model.email = "alex@example"
+        assertFalse(model.canSubmit)
+        model.submit()
+        assertTrue(service.emails.isEmpty())
+        model.email = " alex@example.org "
+        model.submit()
+        assertEquals(listOf("alex@example.org"), service.emails)
+        assertEquals(SignInLinkPhase.Sent("alex@example.org"), model.phase)
+        model.edit()
+        assertEquals(SignInLinkPhase.Editing, model.phase)
+    }
+
+    @Test fun signInLinkFailuresExplainThemselves() {
+        mapOf(
+            AccountFailure.InvalidInput to "Check your email address, then try again.",
+            AccountFailure.RateLimited to "Too many attempts. Please wait a moment and try again.",
+            AccountFailure.Unavailable to "We couldn’t send your sign-in link right now. Please try again in a moment.",
+        ).forEach { (failure, message) ->
+            val model = SignInLinkModel(FakeLink(failure)).apply { email = "alex@example.org" }
+            model.submit()
+            assertEquals(SignInLinkPhase.Failed(message), model.phase)
+        }
+    }
+
     // MARK: signup
 
     private class FakeSignup(var failure: Exception? = null, var gate: CompletableDeferred<Unit>? = null) : SignupService {

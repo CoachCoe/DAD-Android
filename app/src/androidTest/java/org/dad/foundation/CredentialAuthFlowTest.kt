@@ -15,7 +15,7 @@ import org.junit.Rule
 import org.junit.Test
 
 /**
- * Email signup, password sign-in and set-password through the REAL conformers, session and screens
+ * Email signup, an emailed sign-in link, password sign-in and set-password through the REAL conformers, session and screens
  * on the DEBUG-only scripted transport (`stub_backend`). Script: a claim token beginning `good`
  * signs in; alex@example.org / correct-horse-battery is the one valid password login; a wrong
  * current password on set-password is a 422 CURRENT_PASSWORD_INCORRECT that keeps the session.
@@ -70,6 +70,20 @@ class CredentialAuthFlowTest {
             fillSignup()
             waitFor("check-email")
             compose.onNodeWithTag("check-email-address").assertIsDisplayed()
+            type("paste-input", "https://stub.invalid/account/claim#token=good" + "A".repeat(40))
+            compose.tapSafely("paste-submit")
+            waitFor("open-settings")
+        }
+    }
+
+    @Test fun anExistingDonorAsksForASignInLinkThenClaimsItAndLandsInTheDonorShell() {
+        launch().use {
+            openMethods()
+            compose.tapSafely("method-email-link")
+            waitFor("email-link-sign-in")
+            type("email-link-email", "alex@example.org")
+            compose.tapSafely("email-link-submit")
+            waitFor("check-email")
             type("paste-input", "https://stub.invalid/account/claim#token=good" + "A".repeat(40))
             compose.tapSafely("paste-submit")
             waitFor("open-settings")

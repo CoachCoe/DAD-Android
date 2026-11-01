@@ -146,6 +146,14 @@ class EngagementWiredFlowTest {
         }
     }
 
+    @Test fun aWalletPassThatCannotBePreparedSaysTheCodeStillWorks() {
+        openEngagement().use {
+            waitFor("wallet-add")
+            tap("wallet-add")
+            textOf("wallet-error", "on-screen code still works")
+        }
+    }
+
     @Test fun aDonorWithNoPublicNameIsPromptedToChooseOne() {
         openEngagement("stub_no_public_name").use {
             waitFor("name-field")

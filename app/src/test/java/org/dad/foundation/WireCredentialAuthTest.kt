@@ -27,6 +27,24 @@ class WireCredentialAuthTest {
     private suspend fun failure(block: suspend () -> Any?): Throwable? = runCatching { block() }.exceptionOrNull()
     private val form = SignupForm("Alex Doe", "alex@example.org", "78701", "Austin")
 
+    // MARK: sign-in link
+
+    @Test fun signInLinkPostsOnlyTheEmailWithoutCredentials() = runTest {
+        val (wire, http) = auth(202, """{"message":"If this email matches a donor account, a sign-in link will arrive shortly."}""")
+        wire.requestSignInLink("alex@example.org")
+        val sent = http.requests.single()
+        assertEquals("/donor/login", sent.path)
+        assertEquals("POST", sent.method)
+        assertEquals("""{"email":"alex@example.org"}""", sent.body)
+        assertEquals("native", sent.headers["x-dad-client"])
+        assertNull(sent.headers["authorization"])
+    }
+
+    @Test fun signInLinkStatusMapping() = runTest {
+        mapOf(422 to AccountFailure.InvalidInput, 429 to AccountFailure.RateLimited, 503 to AccountFailure.Unavailable, 403 to AccountFailure.Unavailable)
+            .forEach { (status, expected) -> assertEquals("$status", expected, failure { auth(status).first.requestSignInLink("alex@example.org") }) }
+    }
+
     // MARK: signup
 
     @Test fun signupSendsTheFormWithNativeHeadersAndNoCredentials() = runTest {

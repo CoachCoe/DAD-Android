@@ -55,6 +55,14 @@ interface SignupService {
     suspend fun requestSignup(form: SignupForm)
 }
 
+/**
+ * A sign-in link for an existing donor (`login`). The server answers the same whether or not the address
+ * has an account, so the app only ever says a link is on its way; the donor claims it via [AccountSession.claim].
+ */
+interface SignInLinkService {
+    suspend fun requestSignInLink(email: String)
+}
+
 interface PasswordSignInService {
     /** Returns native credentials; the caller hands them to [AccountSession.establish]. */
     suspend fun signIn(email: String, password: String): Credentials
@@ -66,8 +74,9 @@ interface PasswordSettingsService {
 }
 
 /** Used when no API origin is configured (release): every call fails clearly, never via a preview double. */
-object UnconfiguredCredentialAuth : SignupService, PasswordSignInService {
+object UnconfiguredCredentialAuth : SignupService, SignInLinkService, PasswordSignInService {
     override suspend fun requestSignup(form: SignupForm) = throw AccountFailure.InvalidConfiguration
+    override suspend fun requestSignInLink(email: String) = throw AccountFailure.InvalidConfiguration
     override suspend fun signIn(email: String, password: String): Credentials = throw AccountFailure.InvalidConfiguration
 }
 
@@ -123,6 +132,51 @@ class SignupModel(private val service: SignupService) : ViewModel() {
 
     companion object {
         fun factory(service: SignupService): ViewModelProvider.Factory = viewModelFactory { initializer { SignupModel(service) } }
+    }
+}
+
+sealed interface SignInLinkPhase {
+    data object Editing : SignInLinkPhase
+    data object Submitting : SignInLinkPhase
+    data class Sent(val email: String) : SignInLinkPhase
+    data class Failed(val message: String) : SignInLinkPhase
+}
+
+class SignInLinkModel(private val service: SignInLinkService) : ViewModel() {
+    var phase: SignInLinkPhase by mutableStateOf(SignInLinkPhase.Editing)
+        private set
+    var email by mutableStateOf("")
+
+    val canSubmit: Boolean get() = phase !is SignInLinkPhase.Submitting && CredentialRules.isPlausibleEmail(email)
+
+    fun submit() {
+        if (!canSubmit) return
+        phase = SignInLinkPhase.Submitting
+        val address = email.trim()
+        viewModelScope.launch {
+            try {
+                service.requestSignInLink(address)
+                phase = SignInLinkPhase.Sent(address)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                phase = SignInLinkPhase.Failed(message(error))
+            }
+        }
+    }
+
+    fun edit() { phase = SignInLinkPhase.Editing }
+
+    internal fun message(error: Exception): String = when (error) {
+        is AccountFailure.InvalidInput -> "Check your email address, then try again."
+        is AccountFailure.RateLimited -> RATE_LIMITED
+        is AccountFailure.Unavailable -> "We couldn’t send your sign-in link right now. Please try again in a moment."
+        is AccountFailure.InvalidConfiguration -> PhoneSignInModel.NOT_CONFIGURED
+        else -> SOMETHING_WENT_WRONG
+    }
+
+    companion object {
+        fun factory(service: SignInLinkService): ViewModelProvider.Factory = viewModelFactory { initializer { SignInLinkModel(service) } }
     }
 }
 

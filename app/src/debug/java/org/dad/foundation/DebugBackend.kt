@@ -18,12 +18,14 @@ import okio.Buffer
  * network replaced. This source set is compiled into debug builds only.
  *
  * Script: phone sign-in accepts code `123456`; `000000` is throttled (429); anything else is a 401.
- * Email signup answers 200 `{"sent":true}` (an address containing `bad` is a 422, `throttle` a 429); a claim token
+ * Email signup answers 200 `{"sent":true}` (an address containing `bad` is a 422, `throttle` a 429); a sign-in link
+ * request answers 202 for any address (`throttle` a 429); a claim token
  * starting with `good` signs in (anything else is a 401). Password sign-in accepts alex@example.org with
  * `correct-horse-battery` (others 401, `throttle` 429). Set-password: a wrong or missing current password
  * is a 422 `CURRENT_PASSWORD_INCORRECT` (the session stays), a new password under 12 characters a plain 422.
  * Profile/preferences/logout/refresh behave like a live account; account deletion succeeds (200)
  * unless `stub_delete_blocked` (409), after which the account is gone (profile -> 401).
+ * Contact details, email change, sessions, the employer link and the Wallet pass are scripted by [StubAccount].
  * Events (`/donor/me/events`) are scripted by [StubEvents] (`stub_events_invited`, `stub_events_fail_first`, `stub_events_not_eligible`).
  * `stub_signed_in` starts with a stored session. The donor-home reads follow the scenario extras
  * (`stub_dashboard_empty`, `stub_dashboard_fail_first`, `stub_dashboard_unranked`); see [StubDonorHome].
@@ -52,12 +54,15 @@ object DebugBackend {
             signIn = WireAuth(ORIGIN, "Stub device", http),
             settings = WireSettings(ProductClient(ORIGIN, session, http), onLocalWipe = { attribution.clear() }),
             signup = credentialAuth,
+            signInLink = credentialAuth,
             passwordSignIn = credentialAuth,
             passwordSettings = WirePasswordSettings(ProductClient(ORIGIN, session, http)),
             dashboard = WireDashboard(ProductClient(ORIGIN, session, http)),
             giving = GivingKit(WireGiving(ProductClient(ORIGIN, session, http)), stubComplete = interceptor::completeHandoff, pollDelayMs = 200),
             events = WireEvents(ProductClient(ORIGIN, session, http)),
             engagement = WireEngagement(ProductClient(ORIGIN, session, http)),
+            management = WireAccountManagement(ProductClient(ORIGIN, session, http)),
+            wallet = WireWalletPass(ProductClient(ORIGIN, session, http)),
         )
     }
 }
@@ -73,6 +78,7 @@ private class StubInterceptor(private val deletionBlocked: Boolean, scenario: St
     private val giving = StubGiving(gift)
     private val events = StubEvents(eventsScenario)
     private val engagement = StubEngagement(engagementScenario)
+    private val account = StubAccount()
     private var generation = 0
     private var deleted = false
     private var version = 3
@@ -94,8 +100,8 @@ private class StubInterceptor(private val deletionBlocked: Boolean, scenario: St
 
     @Synchronized private fun profile(): String {
         val flags = prefs.entries.joinToString(",") { "\"${it.key}\":${it.value}" }
-        return """{"email":"alex@example.org","public_name":"Alex","account_role":"DONOR","zip":"78701","city":"Austin",""" +
-            """"timezone":"America/Chicago","phone":"","volunteer_interests":[],"version":$version,"consent_version":"stub-v1",$flags}"""
+        return """{"email":"alex@example.org","public_name":"Alex","account_role":"DONOR","zip":"${account.zip}","city":"${account.city}",""" +
+            """"timezone":"America/Chicago","phone":"${account.phone}","volunteer_interests":[],"version":$version,"consent_version":"stub-v1",$flags}"""
     }
 
     @Synchronized override fun intercept(chain: Interceptor.Chain): Response {
@@ -116,6 +122,11 @@ private class StubInterceptor(private val deletionBlocked: Boolean, scenario: St
                 payload.contains("throttle") -> reply(429)
                 payload.contains("bad") -> reply(422)
                 else -> reply(200, """{"sent":true}""")
+            }
+            "POST" to "/donor/login" -> when {
+                payload.contains("throttle") -> reply(429)
+                !payload.contains("@") || payload.contains("\"next\"") -> reply(422)
+                else -> reply(202, """{"message":"If this email matches a donor account, a sign-in link will arrive shortly."}""")
             }
             "POST" to "/donor/claim" -> if (payload.contains("\"token\":\"good")) reply(200, session()) else reply(401)
             "POST" to "/donor/password/sign-in" -> when {
@@ -149,7 +160,10 @@ private class StubInterceptor(private val deletionBlocked: Boolean, scenario: St
                 else -> { deleted = true; reply(200, """{"deleted":true}""") }
             }
             "POST" to "/donor/logout" -> reply(200, """{"signed_out":true}""")
-            else -> if (request.url.encodedPath.startsWith("/donor/me/recurring") || request.url.encodedPath.startsWith("/donor/me/payment-method")) {
+            else -> if (account.handles(request.method, request.url.encodedPath)) {
+                if (!authorized || deleted) reply(401)
+                else account.answer(request.method, request.url.encodedPath, payload, ::profile).let { (code, json) -> reply(code, json) }
+            } else if (request.url.encodedPath.startsWith("/donor/me/recurring") || request.url.encodedPath.startsWith("/donor/me/payment-method")) {
                 if (!authorized || deleted) reply(401)
                 else giving.answer(request.method, request.url.encodedPath, payload, request.header("Idempotency-Key")).let { (code, json) -> reply(code, json) }
             } else if (engagement.handles(request.url.encodedPath)) {

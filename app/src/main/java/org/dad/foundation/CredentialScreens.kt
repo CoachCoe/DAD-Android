@@ -55,7 +55,7 @@ internal fun PasswordField(value: String, onChange: (String) -> Unit, label: Str
 internal fun SignupFlow(model: SignupModel, onPastedLink: (String) -> Boolean, notice: String?, onBack: () -> Unit) {
     val sent = model.phase as? SignupPhase.Sent
     if (sent != null) {
-        CheckEmail(sent.email, notice, onPastedLink, onChangeEmail = model::edit)
+        CheckEmail("We sent a sign-in link to ${sent.email}. Open it on this phone to continue.", notice, onPastedLink, onChangeEmail = model::edit)
         return
     }
     val busy = model.phase is SignupPhase.Submitting
@@ -95,15 +95,43 @@ internal fun SignupFlow(model: SignupModel, onPastedLink: (String) -> Boolean, n
     }
 }
 
+/** An existing donor asks for a single-use sign-in link, then lands on "Check your email". */
+@Composable
+internal fun EmailLinkFlow(model: SignInLinkModel, onPastedLink: (String) -> Boolean, notice: String?, onBack: () -> Unit) {
+    val sent = model.phase as? SignInLinkPhase.Sent
+    if (sent != null) {
+        // The server never says whether the address has an account, so neither does the app.
+        CheckEmail("If ${sent.email} belongs to a DAD account, we sent it a sign-in link. Open it on this phone to continue.",
+            notice, onPastedLink, onChangeEmail = model::edit)
+        return
+    }
+    val busy = model.phase is SignInLinkPhase.Submitting
+    AuthColumn("email-link-sign-in") {
+        Text("Sign in with an email link", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
+        Spacer(Modifier.height(16.dp))
+        OutlinedTextField(
+            value = model.email, onValueChange = { model.email = it.take(254) }, label = { Text("Email") }, singleLine = true, enabled = !busy,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Done),
+            modifier = Modifier.fillMaxWidth().testTag("email-link-email").semantics { contentType = ContentType.EmailAddress },
+        )
+        Spacer(Modifier.height(16.dp))
+        DadPrimaryButton("Email me a link", Modifier.testTag("email-link-submit")) { if (model.canSubmit) model.submit() }
+        if (busy) { Spacer(Modifier.height(12.dp)); CircularProgressIndicator(modifier = Modifier.testTag("email-link-working")) }
+        (model.phase as? SignInLinkPhase.Failed)?.let { FieldError(it.message, "email-link-error") }
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = onBack, modifier = Modifier.testTag("email-link-back")) { Text("Back") }
+    }
+}
+
 /** "Check your email": the link normally opens the app by itself; a pasted link is the fallback. */
 @Composable
-private fun CheckEmail(email: String, notice: String?, onPastedLink: (String) -> Boolean, onChangeEmail: () -> Unit) {
+private fun CheckEmail(message: String, notice: String?, onPastedLink: (String) -> Boolean, onChangeEmail: () -> Unit) {
     var pasted by rememberSaveable { mutableStateOf("") }
     var unrecognised by rememberSaveable { mutableStateOf(false) }
     AuthColumn("check-email") {
         Text("Check your email", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
         Spacer(Modifier.height(12.dp))
-        Text("We sent a sign-in link to $email. Open it on this phone to continue.", modifier = Modifier.testTag("check-email-address"))
+        Text(message, modifier = Modifier.testTag("check-email-address"))
         Spacer(Modifier.height(12.dp))
         Text("The link works once and expires soon. If it doesn’t open the app, paste it here.")
         Spacer(Modifier.height(12.dp))

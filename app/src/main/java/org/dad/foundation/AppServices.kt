@@ -17,6 +17,7 @@ class ExternalSignInDeps(
 class AuthServices(
     val phone: SignInService,
     val signup: SignupService,
+    val link: SignInLinkService,
     val password: PasswordSignInService,
     val external: ExternalSignInDeps,
 )
@@ -27,6 +28,7 @@ class AppServices(
     val signIn: SignInService,
     val settings: SettingsService?,
     val signup: SignupService = UnconfiguredCredentialAuth,
+    val signInLink: SignInLinkService = UnconfiguredCredentialAuth,
     val passwordSignIn: PasswordSignInService = UnconfiguredCredentialAuth,
     val passwordSettings: PasswordSettingsService? = null,
     val external: ExternalSignInDeps = ExternalSignInDeps(),
@@ -34,6 +36,8 @@ class AppServices(
     val giving: GivingKit? = null,
     val events: EventsService? = null,
     val engagement: EngagementService? = null,
+    val management: AccountManagementService? = null,
+    val wallet: WalletPassService? = null,
 )
 
 /** DEBUG launch switches. Always all-false in a release build. */
