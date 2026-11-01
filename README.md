@@ -218,7 +218,8 @@ at once and reverts with an inline notice if the save fails). Today's initiative
 ## Account (contract 2.9.0)
 
 Settings carries the rest of the donor account: contact details (`saveProfile`: ZIP, city, phone), an email change
-(`requestEmailChange`; the emailed `/account/email-change#token=` link is claimed like a sign-in link), signed-in
+(`requestEmailChange`; the emailed `/account/email-change#token=` link opens the website
+for the two-step confirmation, and completion revokes the app session), signed-in
 devices (`sessions`, `revokeSession`, `revokeOtherSessions`, and `logoutAll` to sign out everywhere), the employer
 programme (`employeeTeam`, `employeeEnroll` with a company code, `employeeJoinTeam`), and the referral code as a
 Google Wallet pass (`walletProviders` / `googlePass`, offered only when the server says Google Wallet is configured).
