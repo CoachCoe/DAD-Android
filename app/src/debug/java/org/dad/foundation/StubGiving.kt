@@ -65,6 +65,7 @@ internal class StubGiving(scenario: StubGift) {
                 else -> {
                     checkoutKey = idempotencyKey
                     checkoutAmount = requested
+                    DebugBackend.checkoutReferral = Regex("\"referral_token\"\\s*:\\s*\"([^\"]+)\"").find(body)?.groupValues?.get(1)
                     201 to """{"url":"https://checkout.stub.invalid/c/pay/cs_stub_1","session_id":"cs_stub_1","expires_at":"2026-10-31T13:00:00Z"}"""
                 }
             }

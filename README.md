@@ -54,8 +54,8 @@ configuration deprecation diagnostics; those upstream warnings are not suppresse
 
 ## Contract, sessions, and transport
 
-`foundation.lock.json` pins the mobile foundation release (currently 2.9.0, tag
-`mobile-foundation-v2.9.0`) and its manifest
+`foundation.lock.json` pins the mobile foundation release (currently 2.10.0, tag
+`mobile-foundation-v2.10.0`) and its manifest
 SHA-256. The vendored release is verified before code generation. The build invokes pinned
 OpenAPI Generator CLI 7.20.0 and generates Retrofit coroutine interfaces and Gson models
 for the operations allow-listed in `scripts/prepare-client.mjs`. No client is generated
@@ -85,13 +85,15 @@ For a real environment, pass `-PdadApiOrigin=https://API_HOST` and
 `-PdadPublicOrigin=https://PUBLIC_HOST`. These are public configuration values, not secrets.
 App-link hooks handle launch and foreground intents using the pinned origin/path policy;
 profile access can wait for sign-in, and plain claim links can establish a session.
-Custom Tabs preserve website behavior for referrals, email changes, and unimplemented
-features. Claim links with supported dashboard or payment-method return destinations are claimed
+Referral and company-code links are recorded natively (below); Custom Tabs preserve website
+behavior for email changes and unimplemented features. Claim links with supported dashboard or payment-method return destinations are claimed
 in-app and open the requested native screen. Notifications admit only approved relative paths.
 
-Production app links require the signing certificate's SHA-256 in a matching
-DAD-Main `assetlinks.json`, plus an HTTPS VIEW intent filter with the verified
-host. The release build ships application ID `org.dad.foundation`; the debug
+The manifest's `.AppLinks` alias carries the `autoVerify` HTTPS VIEW intent filter for the host of
+`dadPublicOrigin`, on the paths DAD-Main's `apple-app-site-association` names (`/r/`, `/c/`, `/partner`,
+`/partner/accept`, and the `/account/...` links); without an origin it is disabled. Verification also needs the
+signing certificate's SHA-256 and the application ID in DAD-Main's `assetlinks.json`
+(`DONOR_ANDROID_APP_CERT_SHA256`, `DONOR_ANDROID_APP_PACKAGE`); until then Android opens the links in the browser. The release build ships application ID `org.dad.foundation`; the debug
 build uses `org.dad.foundation.debug` so both install side by side. Phone, email signup and
 password sign-in are wired (see below). No permission is requested on startup, and no
 staging/production service is contacted by the synthetic preview.
@@ -263,5 +265,10 @@ Firebase project for the app ID, its `google-services` configuration, the Fireba
 dependency decision), an implementation of `PushTokenProvider`, the `POST_NOTIFICATIONS` runtime permission on
 Android 13+, and DAD-Main's FCM credentials. `stub_push` exercises the rest with a fixed token.
 
-**Referral attribution** is captured by the website (`/r/<code>`, `/c/<code>`). The mobile contract's signup has no
-attribution field, so the app keeps its capture seam (`AttributionCapture`) unused until DAD-Main adds one.
+**Referral and company-code links (contract 2.10).** An invite (`/r/<code>`, `?via=irl` in person) or company
+(`/c/<code>`) link that opens the app is recorded with DAD-Main (`captureReferral` / `captureCompany`), and the visitor
+token it returns is kept where the website keeps its cookie (`LinkAttribution`, SharedPreferences; the latest link
+wins, and a visit that keeps nothing discards it). The referral token goes with the first monthly gift
+(`startRecurringCheckout`'s `referral_token`, part of the command's idempotency fingerprint), so the referrer is credited
+as on the web; the company token is bound once the donor is signed in (`bindCompanyTouch`). Before sign-in an invite
+names the referrer on the start screen. Account deletion forgets both.

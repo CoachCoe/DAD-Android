@@ -47,6 +47,8 @@ class AppServices(
     val push: PushRegistration? = null,
     /** Null until a push provider is linked; then the donor and partner register at every launch. */
     val pushTokens: PushTokenProvider? = null,
+    /** Referral and company-code link visits, kept and spent as the website's cookies are; null in the preview. */
+    val links: LinkAttribution? = null,
 )
 
 /** DEBUG launch switches. Always all-false in a release build. */

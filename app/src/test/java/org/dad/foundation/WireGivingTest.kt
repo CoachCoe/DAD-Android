@@ -127,7 +127,7 @@ class WireGivingTest {
     @Test fun anEmptyBodyOnACommandIsInvalidAndKeepsTheKey() = runTest {
         val rig = Rig(backgroundScope) { 200 to "" }
         assertEquals(AccountFailure.InvalidResponse, failure { rig.wire.startGift(15000) })
-        assertTrue(rig.ledger.isHolding("checkout:15000"))
+        assertTrue(rig.ledger.isHolding("checkout:15000:none"))
     }
 
     @Test fun everyStatusMapsOnTheReads() = runTest {
@@ -331,6 +331,22 @@ class WireGivingTest {
         assertNull(post.headers["origin"])
     }
 
+    @Test fun startGiftCarriesTheKeptReferralAndKeysByIt() = runTest {
+        var checkouts = 0
+        val http = ScriptedHttp { if (it.path == "/donor/me/recurring/checkout" && checkouts++ == 0) 503 to "{}" else 201 to checkout }
+        val client = http.client()
+        val session = AccountSession(WireAPI(TEST_ORIGIN, client), RecordingStore(validCredentials()), backgroundScope)
+        var kept = "r" + "1".repeat(42)
+        val wire = WireGiving(ProductClient(TEST_ORIGIN, session, client), referral = { kept })
+        assertEquals(AccountFailure.Unavailable, failure { wire.startGift(6000) })
+        kept = "r" + "2".repeat(42)
+        wire.startGift(6000)
+        val posts = http.requests.filter { it.path == "/donor/me/recurring/checkout" }
+        assertEquals(listOf("""{"amount_minor":6000,"referral_token":"r${"1".repeat(42)}"}""", """{"amount_minor":6000,"referral_token":"r${"2".repeat(42)}"}"""),
+            posts.map { it.body })
+        assertNotEquals("a changed referral reused the key", posts[0].headers["idempotency-key"], posts[1].headers["idempotency-key"])
+    }
+
     @Test fun startGiftRefusesAnAmountOffTheDailyRuleWithoutARequest() = runTest {
         val rig = Rig(backgroundScope) { 201 to checkout }
         for (amount in listOf(0, 100, 2999, 3001, 93000, -3000)) {
@@ -367,10 +383,10 @@ class WireGivingTest {
     @Test fun aUnconfiguredProcessorIsDistinctFromATransientOutage() = runTest {
         val unconfigured = Rig(backgroundScope) { 503 to """{"detail":"Payments are not configured.","code":"PAYMENTS_UNCONFIGURED"}""" }
         assertEquals(AccountFailure.PaymentsUnavailable, failure { unconfigured.wire.startGift(15000) })
-        assertFalse("not retryable: the key is retired", unconfigured.ledger.isHolding("checkout:15000"))
+        assertFalse("not retryable: the key is retired", unconfigured.ledger.isHolding("checkout:15000:none"))
         val outage = Rig(backgroundScope) { 503 to """{"detail":"try later"}""" }
         assertEquals(AccountFailure.Unavailable, failure { outage.wire.startGift(15000) })
-        assertTrue(outage.ledger.isHolding("checkout:15000"))
+        assertTrue(outage.ledger.isHolding("checkout:15000:none"))
     }
 
     @Test fun startGiftReusesItsKeyOnA503A429AndALostResponseThenRetiresItOnSuccess() = runTest {
@@ -398,7 +414,7 @@ class WireGivingTest {
             var current = code
             val rig = Rig(backgroundScope) { current to "" }
             failure { rig.wire.startGift(15000) }
-            assertFalse("status $code", rig.ledger.isHolding("checkout:15000"))
+            assertFalse("status $code", rig.ledger.isHolding("checkout:15000:none"))
             current = 503
             failure { rig.wire.startGift(15000) }
             val keys = rig.posts("/donor/me/recurring/checkout").map { it.headers["idempotency-key"] }
@@ -501,7 +517,7 @@ class WireGivingTest {
         release.countDown()
         withContext(Dispatchers.IO) { start.join() }
         assertTrue("expected CancellationException, got ${thrown.get()}", thrown.get() is CancellationException)
-        assertTrue("the outcome is unknown, so a retry must reuse the key", rig.ledger.isHolding("checkout:15000"))
+        assertTrue("the outcome is unknown, so a retry must reuse the key", rig.ledger.isHolding("checkout:15000:none"))
         assertTrue(rig.session.isSignedIn())
     }
 

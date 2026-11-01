@@ -31,6 +31,9 @@ import okio.Buffer
  * `/analytics/events` accepts every batch; the analytics question starts answered "no" unless `stub_analytics_unset`.
  * `stub_push` links a push provider with a fixed token, which `/donor/me/push-device` accepts.
  * Events (`/donor/me/events`) are scripted by [StubEvents] (`stub_events_invited`, `stub_events_fail_first`, `stub_events_not_eligible`).
+ * Link capture answers like the server: referral code `ALEX42` is Alex R's, company code `ACME42` is Acme's, and any
+ * other code keeps the token sent, if any; `/donor/me/company-touch` binds the `ACME42` token. The referral token the
+ * last checkout carried is [checkoutReferral].
  * `stub_signed_in` starts with a stored session. The donor-home reads follow the scenario extras
  * (`stub_dashboard_empty`, `stub_dashboard_fail_first`, `stub_dashboard_unranked`); see [StubDonorHome].
  */
@@ -40,6 +43,10 @@ object DebugBackend {
     fun resetRequestLog() = requestLog.clear()
 
     const val ORIGIN = "https://stub.invalid"
+    const val REFERRAL_TOKEN = "stub-referral-token-0000000000000000000000"
+    const val COMPANY_TOKEN = "stub-company-token-00000000000000000000000"
+    /** The `referral_token` the last `startRecurringCheckout` sent, for tests. */
+    @Volatile var checkoutReferral: String? = null
     const val STUB_PUSH_TOKEN = "stub-fcm-registration-token-0123456789"
     /** The public (link) origin the stub accepts claim links for, so a pasted sign-in link routes in UI tests. */
     const val PUBLIC_ORIGIN = ORIGIN
@@ -57,17 +64,20 @@ object DebugBackend {
         )
         val session = AccountSession(WireAPI(ORIGIN, http), store, scope)
         val attribution = PrefsAttributionStore(context.applicationContext)
+        // Each stub launch starts as a fresh install: no link visit kept from an earlier run.
+        val linkTokens = MemoryLinkTokenStore()
         val credentialAuth = WireCredentialAuth(ORIGIN, "Stub device", http)
         return AppServices(
             session = session,
             signIn = WireAuth(ORIGIN, "Stub device", http),
-            settings = WireSettings(ProductClient(ORIGIN, session, http), onLocalWipe = { attribution.clear() }),
+            settings = WireSettings(ProductClient(ORIGIN, session, http), onLocalWipe = { attribution.clear(); linkTokens.clear() }),
             signup = credentialAuth,
             signInLink = credentialAuth,
             passwordSignIn = credentialAuth,
             passwordSettings = WirePasswordSettings(ProductClient(ORIGIN, session, http)),
             dashboard = WireDashboard(ProductClient(ORIGIN, session, http)),
-            giving = GivingKit(WireGiving(ProductClient(ORIGIN, session, http)), stubComplete = interceptor::completeHandoff, pollDelayMs = 200),
+            giving = GivingKit(WireGiving(ProductClient(ORIGIN, session, http), referral = { linkTokens.load().referral }),
+                stubComplete = interceptor::completeHandoff, pollDelayMs = 200),
             events = WireEvents(ProductClient(ORIGIN, session, http)),
             engagement = WireEngagement(ProductClient(ORIGIN, session, http)),
             management = WireAccountManagement(ProductClient(ORIGIN, session, http)),
@@ -78,6 +88,7 @@ object DebugBackend {
             analytics = analytics,
             push = WireDonorPush(ProductClient(ORIGIN, session, http)),
             pushTokens = if (options.stubPush) PushTokenProvider { STUB_PUSH_TOKEN } else null,
+            links = LinkAttribution(WireLinkAttribution(ORIGIN, ProductClient(ORIGIN, session, http), http), linkTokens, analytics),
         )
     }
 }
@@ -127,6 +138,21 @@ private class StubInterceptor(private val deletionBlocked: Boolean, scenario: St
         val authorized = request.header("Authorization")?.startsWith("Bearer stub-access-") == true
         fun reply(code: Int, json: String = "{}") = Response.Builder().request(request).protocol(Protocol.HTTP_1_1)
             .code(code).message("stub").body(json.toResponseBody("application/json".toMediaType())).build()
+        val path = request.url.encodedPath
+        if (request.method == "POST" && (path.startsWith("/donor/referrals/") || path.startsWith("/donor/company/"))) {
+            val referral = path.startsWith("/donor/referrals/")
+            val kept = Regex("\"token\"\\s*:\\s*\"([^\"]+)\"").find(payload)?.groupValues?.get(1)
+            val token = if (path.substringAfterLast('/') == (if (referral) "ALEX42" else "ACME42")) {
+                if (referral) DebugBackend.REFERRAL_TOKEN else DebugBackend.COMPANY_TOKEN
+            } else kept
+            val tokenJson = token?.let { "\"$it\"" } ?: "null"
+            return if (referral) reply(200, """{"captured":${token != null},"public_name":${if (token == null) "null" else "\"Alex R\""},"token":$tokenJson}""")
+            else reply(200, """{"captured":${token != null},"token":$tokenJson}""")
+        }
+        if (request.method == "POST" && path == "/donor/me/company-touch") {
+            if (!authorized) return reply(401)
+            return reply(200, """{"bound":${payload.contains(DebugBackend.COMPANY_TOKEN)}}""")
+        }
         if (partner.handles(request.url.encodedPath)) {
             val answer = partner.answer(request.method, request.url.encodedPath, payload, request.header("Authorization"))
             return Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(answer.code).message("stub")

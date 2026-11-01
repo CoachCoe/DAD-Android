@@ -33,6 +33,7 @@ const allowed = new Set([
   "inviteOnlyEvents", "eventDetail", "eventCalendar", "donorEventCalendar",
   // push device (donor FCM) + analytics ingest + health
   "registerPushDevice", "unregisterPushDevice", "ingestAnalytics", "live",
+  "captureReferral", "captureCompany", "bindCompanyTouch",
   // employee giving & matching (display surface)
   "employeeEnroll", "employeeJoinTeam", "employeeTeam", "employeeTeams",
   "employeeOurPeople", "employeeWorkforce",

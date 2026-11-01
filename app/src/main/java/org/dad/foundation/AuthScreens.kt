@@ -42,6 +42,8 @@ private enum class AuthStep { RoleSelect, Methods, Phone, EmailLink, Password, S
 @Composable
 fun UnauthenticatedStack(
     notice: String?,
+    /** "<name> invited you", after an invite link was opened before sign-in. */
+    invitation: String? = null,
     auth: AuthServices,
     establish: Establish,
     generation: Int,
@@ -64,7 +66,7 @@ fun UnauthenticatedStack(
         else AuthStep.RoleSelect
     }
     when (step) {
-        AuthStep.RoleSelect -> RoleSelect(notice, analytics) { role ->
+        AuthStep.RoleSelect -> RoleSelect(notice, analytics, invitation) { role ->
             analytics?.emit(AnalyticsEvent.Plain(PlainEvent.ROLE_SELECTED))
             step = if (role == AppRole.DONOR) AuthStep.Methods else AuthStep.Partner
         }
@@ -105,7 +107,7 @@ internal fun AuthColumn(tag: String, content: @Composable () -> Unit) {
 /** Unauthenticated splash: pick a journey before signing in. Shows [notice] (a failed link, a revoked
  *  session, or an unconfigured build) so the reason for being here is never silent. */
 @Composable
-fun RoleSelect(notice: String?, analytics: AnalyticsUploader? = null, onSelect: (AppRole) -> Unit) {
+fun RoleSelect(notice: String?, analytics: AnalyticsUploader? = null, invitation: String? = null, onSelect: (AppRole) -> Unit) {
     AuthColumn("role-select") {
         Text("DAD", style = MaterialTheme.typography.displayMedium, modifier = Modifier.dadHeading())
         Spacer(Modifier.height(16.dp))
@@ -114,6 +116,10 @@ fun RoleSelect(notice: String?, analytics: AnalyticsUploader? = null, onSelect: 
             Spacer(Modifier.height(16.dp))
             Text(notice, style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.testTag("auth-notice").semantics { liveRegion = LiveRegionMode.Polite })
+        }
+        if (invitation != null) {
+            Spacer(Modifier.height(16.dp))
+            Text(invitation, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.testTag("auth-invitation"))
         }
         Spacer(Modifier.height(28.dp))
         DadPrimaryButton("I’m a donor", Modifier.testTag("role-donor")) { onSelect(AppRole.DONOR) }

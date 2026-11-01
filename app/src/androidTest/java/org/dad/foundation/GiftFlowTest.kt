@@ -27,12 +27,14 @@ import org.junit.Test
 class GiftFlowTest {
     @get:Rule val compose = createEmptyComposeRule()
 
-    private fun launch(vararg extras: String): ActivityScenario<MainActivity> {
+    private fun launch(vararg extras: String, link: String? = null): ActivityScenario<MainActivity> {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val intent = Intent(context, MainActivity::class.java)
             .putExtra("stub_backend", true).putExtra("stub_signed_in", true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         extras.forEach { intent.putExtra(it, true) }
+        link?.let { intent.data = android.net.Uri.parse(it) }
         DebugBackend.resetRequestLog()
+        DebugBackend.checkoutReferral = null
         return ActivityScenario.launch(intent)
     }
 
@@ -58,6 +60,19 @@ class GiftFlowTest {
     private fun closeGift() {
         tap("gift-close")
         waitFor("donor-home")
+    }
+
+    @Test fun aGiftStartedAfterAnInviteLinkCreditsTheReferrer() {
+        launch(link = "https://stub.invalid/r/ALEX42?via=irl").use {
+            compose.waitUntil(20_000) { DebugBackend.requestLog.contains("POST /donor/referrals/ALEX42") }
+            waitFor("gift-summary")
+            waitSummary("No monthly gift yet.")
+            openGift()
+            waitFor("start-gift")
+            tap("start-gift")
+            waitFor("hosted-page-stub")
+            assertEquals(DebugBackend.REFERRAL_TOKEN, DebugBackend.checkoutReferral)
+        }
     }
 
     @Test fun startAGiftThroughTheHostedPageThenTheHomeCardShowsIt() {

@@ -15,6 +15,10 @@ sealed interface LinkIntent {
     data class EmailChange(val token: String) : LinkIntent { override fun toString() = "EmailChange([redacted])" }
     /** An emailed partner sign-in link (`/partner/accept#token=`). */
     data class PartnerSignIn(val token: String) : LinkIntent { override fun toString() = "PartnerSignIn([redacted])" }
+    /** A donor's invite link (`/r/{code}`, `?via=irl` when shared in person). */
+    data class Referral(val code: String, val inPerson: Boolean) : LinkIntent
+    /** An employer's company-code link (`/c/{code}`). */
+    data class Company(val code: String) : LinkIntent
     data class Web(val uri: URI) : LinkIntent { override fun toString() = "WebLink([redacted])" }
 }
 private data class LinkPolicy(
@@ -23,6 +27,8 @@ private data class LinkPolicy(
     val partnerProofPaths: List<String>,
     val claimReturnPaths: List<String>,
     val notificationPaths: List<String>,
+    val referralPrefix: String,
+    val companyPrefix: String,
 )
 
 class LinkRouter(publicOrigin: String, policyJson: String) {
@@ -34,7 +40,8 @@ class LinkRouter(publicOrigin: String, policyJson: String) {
         .also { policy ->
             // Gson fills absent fields with null despite the non-null types; an incomplete policy must fail here, not on first use.
             @Suppress("SENSELESS_COMPARISON")
-            require(listOf(policy.accountPaths, policy.proofPaths, policy.partnerProofPaths, policy.claimReturnPaths, policy.notificationPaths).none { it == null })
+            require(listOf(policy.accountPaths, policy.proofPaths, policy.partnerProofPaths, policy.claimReturnPaths, policy.notificationPaths,
+                policy.referralPrefix, policy.companyPrefix).none { it == null })
         }
     fun route(value: String): LinkIntent? {
         if (value.length > 4096) return null
@@ -56,8 +63,21 @@ class LinkRouter(publicOrigin: String, policyJson: String) {
         if (uri.path in policy.accountPaths && uri.query == null && uri.fragment == null) {
             AccountDestination.from(uri.path)?.let { return LinkIntent.Account(it) }
         }
+        if (uri.rawFragment == null) {
+            code(uri.path, policy.referralPrefix)?.let { code ->
+                return when (uri.rawQuery) {
+                    null -> LinkIntent.Referral(code, inPerson = false)
+                    "via=irl" -> LinkIntent.Referral(code, inPerson = true)
+                    else -> LinkIntent.Web(uri)
+                }
+            }
+            if (uri.rawQuery == null) code(uri.path, policy.companyPrefix)?.let { return LinkIntent.Company(it) }
+        }
         return LinkIntent.Web(uri)
     }
+    /** The one path segment after [prefix], if it has the shape every referral and company code has. */
+    private fun code(path: String?, prefix: String): String? =
+        path?.takeIf { it.startsWith(prefix) }?.removePrefix(prefix)?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{1,64}")) }
     /** The fragment's pairs when it carries exactly one well-formed `token` (and, if allowed, at most one `next`); else null. */
     private fun proofFragment(uri: URI, allowNext: Boolean): List<Pair<String, String>>? {
         if (uri.query != null || uri.rawFragment == null || uri.rawFragment.length > 1024) return null

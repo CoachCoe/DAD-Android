@@ -12,6 +12,26 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- The paths DAD-Main's apple-app-site-association names, so both apps open the same links. -->
+        <activity-alias android:name=".AppLinks" android:targetActivity=".MainActivity" android:exported="true" android:enabled="${dadAppLinks}">
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="${dadLinkHost}" />
+                <data android:pathPrefix="/r/" />
+                <data android:pathPrefix="/c/" />
+                <data android:path="/partner" />
+                <data android:path="/partner/accept" />
+                <data android:path="/account/claim" />
+                <data android:path="/account/email-change" />
+                <data android:path="/account/payment-method" />
+                <data android:path="/account/dashboard" />
+                <data android:path="/account/profile" />
+                <data android:path="/account/gifts" />
+            </intent-filter>
+        </activity-alias>
         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.files" android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>

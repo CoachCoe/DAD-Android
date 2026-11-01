@@ -25,10 +25,11 @@ import org.junit.Test
 class StubBackendFlowTest {
     @get:Rule val compose = createEmptyComposeRule()
 
-    private fun launch(vararg extras: String): ActivityScenario<MainActivity> {
+    private fun launch(vararg extras: String, link: String? = null): ActivityScenario<MainActivity> {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val intent = Intent(context, MainActivity::class.java).putExtra("stub_backend", true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         extras.forEach { intent.putExtra(it, true) }
+        link?.let { intent.data = android.net.Uri.parse(it) }
         return ActivityScenario.launch(intent)
     }
 
@@ -65,6 +66,13 @@ class StubBackendFlowTest {
         compose.enterText("delete-input", "DELETE")
         compose.waitForIdle()
         compose.tapSafely("delete-confirm")
+    }
+
+    @Test fun anInviteLinkNamesTheReferrerBeforeSignIn() {
+        launch(link = "https://stub.invalid/r/ALEX42").use {
+            waitFor("auth-invitation", 20_000)
+            compose.onNodeWithTag("auth-invitation").assertTextEquals("Alex R invited you to give with DAD.")
+        }
     }
 
     @Test fun signInThenDeleteAccountReturnsToSignIn() {

@@ -132,6 +132,9 @@ class AccountModel(
     /** A line for the unauthenticated screen: a failed sign-in link, an ended session, or an unconfigured build. */
     var notice: String? by mutableStateOf(null)
         private set
+    /** "<name> invited you", after an invite link was opened before sign-in. */
+    var invitation: String? by mutableStateOf(null)
+        private set
     /** Bumped on every sign-in/sign-out so per-session view models are never reused across sessions. */
     var generation: Int by mutableIntStateOf(0)
         private set
@@ -256,9 +259,11 @@ class AccountModel(
                     active.session.profile()
                 }
                 notice = null
+                invitation = null
                 hasSession = true
                 state = AccountState.Ready(profile)
                 registerPush(active)
+                active.links?.let { links -> viewModelScope.launch(io) { links.bindCompany() } }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: AccountFailure.SignedOut) {
                 // Revoked or expired for good: the session cleared itself, so return to sign-in.
@@ -342,6 +347,18 @@ class AccountModel(
                 hasSession -> value
                 else -> { pendingPartnerToken = intent.token; null }
             }
+            is LinkIntent.Referral -> viewModelScope.launch {
+                val links = ensureServices()?.links ?: return@launch
+                val name = withContext(io) { links.captureReferral(intent.code, intent.inPerson) }
+                if (name != null && state !is AccountState.Ready) invitation = "$name invited you to give with DAD."
+            }.let { null }
+            is LinkIntent.Company -> viewModelScope.launch {
+                val links = ensureServices()?.links ?: return@launch
+                withContext(io) {
+                    links.captureCompany(intent.code)
+                    if (hasSession) links.bindCompany()
+                }
+            }.let { null }
             is LinkIntent.EmailChange, is LinkIntent.Web -> value
             null -> null
         }
@@ -451,18 +468,19 @@ class MainActivity : ComponentActivity() {
                         val http = defaultNativeClient().newBuilder().addInterceptor(AnalyticsObserver(analytics)).build()
                         session = AccountSession(WireAPI(origin, http), KeystoreCredentialStore(appContext), scope)
                         val attribution = PrefsAttributionStore(appContext)
+                        val linkTokens = PrefsLinkTokenStore(appContext)
                         val credentialAuth = WireCredentialAuth(origin, android.os.Build.MODEL, http)
                         val external = WireExternalSignIn(origin, android.os.Build.MODEL, http)
                         AppServices(
                             session,
                             WireAuth(origin, android.os.Build.MODEL, http),
-                            WireSettings(ProductClient(origin, session, http), onLocalWipe = { attribution.clear() }),
+                            WireSettings(ProductClient(origin, session, http), onLocalWipe = { attribution.clear(); linkTokens.clear() }),
                             signup = credentialAuth,
                             signInLink = credentialAuth,
                             passwordSignIn = credentialAuth,
                             passwordSettings = WirePasswordSettings(ProductClient(origin, session, http)),
                             dashboard = WireDashboard(ProductClient(origin, session, http)),
-                            giving = GivingKit(WireGiving(ProductClient(origin, session, http))),
+                            giving = GivingKit(WireGiving(ProductClient(origin, session, http), referral = { linkTokens.load().referral })),
                             events = WireEvents(ProductClient(origin, session, http)),
                             engagement = WireEngagement(ProductClient(origin, session, http)),
                             management = WireAccountManagement(ProductClient(origin, session, http)),
@@ -472,6 +490,7 @@ class MainActivity : ComponentActivity() {
                             },
                             analytics = analytics,
                             push = WireDonorPush(ProductClient(origin, session, http)),
+                            links = LinkAttribution(WireLinkAttribution(origin, ProductClient(origin, session, http), http), linkTokens, analytics),
                             external = ExternalSignInDeps(
                                 // No Credential Manager provider is linked, so a configured ID alone never switches a method on.
                                 capabilities = SignInCapabilities.of(SignInConfig(BuildConfig.DAD_GOOGLE_WEB_CLIENT_ID, BuildConfig.DAD_PASSKEY_RP_ID)),
@@ -556,6 +575,7 @@ class MainActivity : ComponentActivity() {
                             }
                         is RoleRouter.Root.Unauthenticated -> UnauthenticatedStack(
                             notice = model.notice,
+                            invitation = model.invitation,
                             auth = model.auth,
                             establish = model.establish(),
                             onPastedLink = { text -> linkRouter?.let { router -> PastedLink.claimToken(text, router)?.let { model.receive(text.trim(), router); true } } ?: false },
