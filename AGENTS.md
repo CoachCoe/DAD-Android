@@ -22,6 +22,12 @@ CI runs the same on API 35 and **lint treats warnings as errors**.
 - Work on `dev`; ship via `dev` → PR → `main`. Never push to `main` directly.
 - Run `git commit` and `git push` as two separate commands.
 
+## Code comments
+
+- Comments explain **why** (a constraint, a trade-off, a non-obvious behavior), not what the
+  code already says.
+- No commented-out code (git keeps history). A `TODO` names a tracked issue.
+
 ## Gotchas not written in the docs
 
 - **`git add -A` silently stages planning docs.** `docs/requirements/` (dev plan, gap
