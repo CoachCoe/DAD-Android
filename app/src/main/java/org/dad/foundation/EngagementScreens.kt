@@ -171,7 +171,7 @@ private fun BadgeTile(badge: Badge, modifier: Modifier = Modifier) {
             },
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Text(badge.title, style = MaterialTheme.typography.labelLarge, color = color)
+        Text(badge.shownTitle, style = MaterialTheme.typography.labelLarge, color = color)
         Text(if (badge.earned) badge.earnedAt?.let { "Earned ${it.format(shortDate)}" } ?: "Earned" else "Locked", style = MaterialTheme.typography.labelSmall, color = color)
         if (!badge.earned) Text(badge.rule, style = MaterialTheme.typography.bodySmall)
         if (badge.perkActive) Text("Perk: ${badge.perk}", style = MaterialTheme.typography.bodySmall)

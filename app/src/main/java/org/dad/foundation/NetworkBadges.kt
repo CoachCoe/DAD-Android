@@ -95,14 +95,21 @@ data class Badge(
     val perk: String,
     val earned: Boolean,
     val earnedAt: OffsetDateTime?,
+    /** The city a city-ranked badge is for (`Top 50 in Chicago`), null for every other badge. */
+    val city: String? = null,
+    /** The server's earned-state title (e.g. `Top 50 in Chicago`); blank or missing falls back to [title]. */
+    val displayTitle: String = "",
 ) {
+    /** The title shown: [displayTitle] once earned (falling back to [title] when blank), the generic [title] while locked. */
+    val shownTitle: String get() = if (earned && displayTitle.isNotBlank()) displayTitle else title
+
     /**
      * The accessibility label — state is in TEXT so a screen reader (and a colour-blind user)
      * knows earned vs locked without relying on colour (B-1, WCAG). Earned: the title + "earned".
      * Locked: the title + "locked" + how to earn it.
      */
     val accessibilityLabel: String
-        get() = if (earned) "$title, earned" else "$title, locked. $rule"
+        get() = if (earned) "$shownTitle, earned" else "$title, locked. $rule"
 
     /** The secondary line under the title: the rule when locked, the perk when earned (the rule again for a badge with no perk). */
     val detailLine: String get() = if (earned) perk.ifBlank { rule } else rule

@@ -29,8 +29,8 @@ internal class StubEngagement(private val scenario: StubEngagementScenario) {
     }
 
     private fun sharing(): String {
-        val name = publicName ?: return """{"public_name":null,"link":null,"irl_link":null}"""
-        return """{"public_name":"$name","link":"https://stub.invalid/r/ALEX2026","irl_link":"https://stub.invalid/r/ALEX2026?via=irl"}"""
+        val name = publicName ?: return """{"public_name":null,"link":null,"irl_link":null,"referral_code":null}"""
+        return """{"public_name":"$name","link":"https://stub.invalid/r/ALEX2026","irl_link":"https://stub.invalid/r/ALEX2026?via=irl","referral_code":"ALEX2026"}"""
     }
 
     private fun badges(): String {
@@ -43,11 +43,14 @@ internal class StubEngagement(private val scenario: StubEngagementScenario) {
             Triple("TC", "Team Captain", "20 converted referrals") to "TEAM_CAPTAIN",
             Triple("NAT2", "Top 2%", "National top 2% by streak") to "",
             Triple("WT", "Winning Team", "Their team finished a month at #1 on the company leaderboard") to "",
+            Triple("CITY50", "Top 50 City", "Reach the top 50 donors in your city") to "",
         )
         val rows = specs.mapIndexed { index, (spec, perk) ->
-            val earned = index < 3
+            val earned = index < 3 || spec.first == "CITY50"
+            val city = if (spec.first == "CITY50") "\"Chicago\"" else "null"
+            val display = if (spec.first == "CITY50") "Top 50 in Chicago" else spec.second
             val at = if (earned) "\"2026-06-01T00:00:00Z\"" else "null"
-            """{"code":"${spec.first}","title":"${spec.second}","rule":"${spec.third}","perk":"$perk","earned":$earned,"earned_at":$at,"artwork":"x"}"""
+            """{"code":"${spec.first}","title":"${spec.second}","rule":"${spec.third}","perk":"$perk","earned":$earned,"earned_at":$at,"artwork":"x","city":$city,"display_title":"$display"}"""
         }
         return """{"badges":[${rows.joinToString(",")}]}"""
     }
