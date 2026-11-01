@@ -1,3 +1,4 @@
+import java.net.URI
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -34,7 +35,14 @@ android {
         // Optional sign-in methods stay off until the owner supplies these (see README). Blank = off.
         buildConfigField("String", "DAD_GOOGLE_WEB_CLIENT_ID", groovy.json.JsonOutput.toJson(providers.gradleProperty("dadGoogleWebClientId").orElse("").get()))
         buildConfigField("String", "DAD_PASSKEY_RP_ID", groovy.json.JsonOutput.toJson(providers.gradleProperty("dadPasskeyRpId").orElse("").get()))
-        buildConfigField("String", "DAD_PUBLIC_ORIGIN", groovy.json.JsonOutput.toJson(providers.gradleProperty("dadPublicOrigin").orElse("").get()))
+        val publicOrigin = providers.gradleProperty("dadPublicOrigin").orElse("").get()
+        buildConfigField("String", "DAD_PUBLIC_ORIGIN", groovy.json.JsonOutput.toJson(publicOrigin))
+        // App Links are verified against the public origin's /.well-known/assetlinks.json, so without an origin the
+        // filter stays disabled (an intent filter cannot be left without a host).
+        val linkHost = publicOrigin.takeIf { it.isNotBlank() }?.let { URI(it).host }
+        check(publicOrigin.isBlank() || (publicOrigin.startsWith("https://") && !linkHost.isNullOrBlank())) { "dadPublicOrigin must be an https origin" }
+        manifestPlaceholders["dadLinkHost"] = linkHost ?: "links.invalid"
+        manifestPlaceholders["dadAppLinks"] = (linkHost != null).toString()
     }
     signingConfigs {
         if (keystoreProperties["storeFile"] != null) {

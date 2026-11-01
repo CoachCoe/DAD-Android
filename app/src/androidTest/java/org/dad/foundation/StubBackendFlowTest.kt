@@ -2,6 +2,7 @@ package org.dad.foundation
 
 import android.content.Intent
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -24,10 +25,11 @@ import org.junit.Test
 class StubBackendFlowTest {
     @get:Rule val compose = createEmptyComposeRule()
 
-    private fun launch(vararg extras: String): ActivityScenario<MainActivity> {
+    private fun launch(vararg extras: String, link: String? = null): ActivityScenario<MainActivity> {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val intent = Intent(context, MainActivity::class.java).putExtra("stub_backend", true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         extras.forEach { intent.putExtra(it, true) }
+        link?.let { intent.data = android.net.Uri.parse(it) }
         return ActivityScenario.launch(intent)
     }
 
@@ -64,6 +66,13 @@ class StubBackendFlowTest {
         compose.enterText("delete-input", "DELETE")
         compose.waitForIdle()
         compose.tapSafely("delete-confirm")
+    }
+
+    @Test fun anInviteLinkNamesTheReferrerBeforeSignIn() {
+        launch(link = "https://stub.invalid/r/ALEX42").use {
+            waitFor("auth-invitation", 20_000)
+            compose.onNodeWithTag("auth-invitation").assertTextEquals("Alex R invited you to give with DAD.")
+        }
     }
 
     @Test fun signInThenDeleteAccountReturnsToSignIn() {
@@ -113,12 +122,53 @@ class StubBackendFlowTest {
         }
     }
 
-    @Test fun partnerSignInIsAnHonestNotice() {
+    @Test fun partnerSignsInWithAPastedLinkAndSignsOut() {
         launch().use {
             waitFor("role-partner")
             compose.tapSafely("role-partner")
-            waitFor("partner-sign-in-notice")
-            compose.onNodeWithTag("partner-sign-in-notice").assertIsDisplayed()
+            waitFor("partner-apply")
+            compose.enterText("partner-sign-in-email", "ada@acme.com")
+            waitEnabled("partner-sign-in-submit")
+            compose.tapSafely("partner-sign-in-submit")
+            waitFor("partner-check-email")
+            compose.enterText("partner-paste-link", "https://stub.invalid/partner/accept#token=goodpartner0123456789abcdefghijklmnop")
+            waitEnabled("partner-paste-submit")
+            compose.tapSafely("partner-paste-submit")
+            waitFor("partner-committed")
+            compose.onNodeWithTag("partner-organization").assertTextEquals("Acme Corp")
+            compose.tapSafely("partner-tab-organization")
+            compose.tapSafely("partner-sign-out")
+            waitFor("role-partner")
+        }
+    }
+
+    @Test fun aStoredPartnerSessionOpensThePortal() {
+        launch("stub_partner_signed_in").use {
+            waitFor("partner-committed")
+            compose.tapSafely("partner-tab-organization")
+            waitFor("partner-invite")
+        }
+    }
+
+    @Test fun theAnalyticsQuestionIsAskedOnceAndAnsweringYesSendsAnEvent() {
+        DebugBackend.resetRequestLog()
+        launch("stub_analytics_unset").use {
+            waitFor("analytics-choice")
+            compose.tapSafely("analytics-allow")
+            compose.waitUntil(15_000) { compose.onAllNodes(hasTestTag("analytics-choice")).fetchSemanticsNodes().isEmpty() }
+            compose.waitUntil(15_000) { "POST /analytics/events" in DebugBackend.requestLog }
+        }
+    }
+
+    @Test fun aTappedNotificationOpensItsScreenAndTheTokenIsRegistered() {
+        DebugBackend.resetRequestLog()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val intent = Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            .putExtra("stub_backend", true).putExtra("stub_signed_in", true).putExtra("stub_push", true)
+            .putExtra("category", "STREAK_AT_RISK").putExtra("path", "/account/gifts")
+        ActivityScenario.launch<MainActivity>(intent).use {
+            waitFor("history-screen")
+            compose.waitUntil(15_000) { "POST /donor/me/push-device" in DebugBackend.requestLog }
         }
     }
 }

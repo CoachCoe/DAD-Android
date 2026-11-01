@@ -3,6 +3,8 @@ package org.dad.foundation
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -68,6 +70,21 @@ class SessionWiringTest {
         job.cancelAndJoin()
         assertNull(store.value)
         assertFalse(session.isSignedIn())
+    }
+
+    @Test fun aCancelledProducerReturningCredentialsCannotReplaceTheSession() = runTest {
+        val store = RecordingStore(validCredentials())
+        val session = AccountSession(Api(), store, backgroundScope)
+        val job = launch {
+            session.establish {
+                currentCoroutineContext().cancel()
+                Credentials("late", "late-refresh", Long.MAX_VALUE)
+            }
+        }
+        job.join()
+        assertTrue(job.isCancelled)
+        assertEquals("access-0", store.value?.access)
+        assertTrue(session.isSignedIn())
     }
 
     @Test fun aFailedProduceLeavesTheExistingSessionAlone() = runTest {

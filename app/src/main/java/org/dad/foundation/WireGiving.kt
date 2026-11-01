@@ -58,7 +58,12 @@ class IdempotencyLedger {
  * configured (do not retry); any other status, or a body that does not decode -> unavailable / invalid
  * response. Error bodies are never surfaced. Cancellation propagates untouched.
  */
-class WireGiving(private val product: ProductClient, private val ledger: IdempotencyLedger = IdempotencyLedger()) : GivingService {
+class WireGiving(
+    private val product: ProductClient,
+    private val ledger: IdempotencyLedger = IdempotencyLedger(),
+    /** The referral token a link visit kept (contract 2.10), credited at checkout as the website's cookie is. */
+    private val referral: () -> String? = { null },
+) : GivingService {
 
     override suspend fun recurring(): RecurringState = product.perform { retrofit ->
         mapRecurring(retrofit.create(GivingApi::class.java).recurring().givingBody().asObjectOrInvalid())
@@ -119,8 +124,13 @@ class WireGiving(private val product: ProductClient, private val ledger: Idempot
 
     override suspend fun startGift(amountMinor: Int): PaymentPath {
         if (GiftAmount.ofMonthlyMinor(amountMinor) == null) throw AccountFailure.InvalidInput
-        val body = JsonObject().apply { addProperty("amount_minor", amountMinor.toLong()) }
-        return command("checkout:$amountMinor") { key ->
+        val referral = referral()
+        val body = JsonObject().apply {
+            addProperty("amount_minor", amountMinor.toLong())
+            referral?.let { addProperty("referral_token", it) }
+        }
+        // A retry under one key must repeat its referral, so a changed referral is a different command.
+        return command("checkout:$amountMinor:${referralFingerprint(referral)}") { key ->
             product.perform { retrofit ->
                 val json = retrofit.create(GivingApi::class.java).startRecurringCheckout(key, body).givingBody().asObjectOrInvalid()
                 json.str("session_id")

@@ -56,13 +56,16 @@ interface ReferralSharer {
 
 /** Drives sharing + analytics; the UI calls this, not the raw sharer. */
 class ReferralShareAction(private val sharer: ReferralSharer, private val analytics: AnalyticsEmitter? = null) {
-    fun share(link: String, channel: String = "system") {
+    fun share(link: String, channel: String = "share_sheet") {
         sharer.share(link, channel)
         analytics?.emit(AnalyticsEvent.InviteShared(channel))
     }
     fun copy(link: String) {
         sharer.copy(link)
         analytics?.emit(AnalyticsEvent.InviteShared("copy"))
+    }
+    fun codeShown() {
+        analytics?.emit(AnalyticsEvent.IrlCodeShown)
     }
 }
 

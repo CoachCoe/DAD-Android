@@ -69,6 +69,8 @@ fun EngagementHome(
     sharer: ReferralShareAction,
     onClose: (() -> Unit)? = null,
     onSignedOut: () -> Unit = {},
+    /** Adds the referral code to Google Wallet; null where Wallet is not wired (previews). */
+    wallet: WalletPassModel? = null,
 ) {
     LaunchedEffect(Unit) { model.load() }
     LaunchedEffect(model.signedOut) { if (model.signedOut) onSignedOut() }
@@ -98,19 +100,21 @@ fun EngagementHome(
                 Column(Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
                     model.actionError?.let { Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("engagement-action-error")) }
                 }
-                model.snapshot?.let { Content(model, it, publicOrigin, sharer, onShowQr = { showQr = true }) }
+                model.snapshot?.let { Content(model, it, publicOrigin, sharer, wallet, onShowQr = { showQr = true; sharer.codeShown() }) }
             }
         }
     }
 }
 
 @Composable
-private fun Content(model: EngagementModel, snapshot: EngagementSnapshot, publicOrigin: String, sharer: ReferralShareAction, onShowQr: () -> Unit) {
+private fun Content(
+    model: EngagementModel, snapshot: EngagementSnapshot, publicOrigin: String, sharer: ReferralShareAction, wallet: WalletPassModel?, onShowQr: () -> Unit,
+) {
     ImpactCard(snapshot.impact)
     BadgesSection(snapshot.badges)
     RankingsCard(model)
     NetworkCard(snapshot.network)
-    InviteCard(model, snapshot, publicOrigin, sharer, onShowQr)
+    InviteCard(model, snapshot, publicOrigin, sharer, wallet, onShowQr)
 }
 
 // MARK: impact (I-1, I-3)
@@ -171,7 +175,7 @@ private fun BadgeTile(badge: Badge, modifier: Modifier = Modifier) {
             },
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Text(badge.title, style = MaterialTheme.typography.labelLarge, color = color)
+        Text(badge.shownTitle, style = MaterialTheme.typography.labelLarge, color = color)
         Text(if (badge.earned) badge.earnedAt?.let { "Earned ${it.format(shortDate)}" } ?: "Earned" else "Locked", style = MaterialTheme.typography.labelSmall, color = color)
         if (!badge.earned) Text(badge.rule, style = MaterialTheme.typography.bodySmall)
         if (badge.perkActive) Text("Perk: ${badge.perk}", style = MaterialTheme.typography.bodySmall)
@@ -230,12 +234,14 @@ private fun NetworkCard(network: NetworkView?) {
 // MARK: invite link + IRL code (R-1..R-4)
 
 @Composable
-private fun InviteCard(model: EngagementModel, snapshot: EngagementSnapshot, publicOrigin: String, sharer: ReferralShareAction, onShowQr: () -> Unit) {
+private fun InviteCard(
+    model: EngagementModel, snapshot: EngagementSnapshot, publicOrigin: String, sharer: ReferralShareAction, wallet: WalletPassModel?, onShowQr: () -> Unit,
+) {
     HomeCard("invite-section") {
         Text("Invite friends", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
         val referral = snapshot.referral
         when {
-            referral != null -> Invite(referral, publicOrigin, sharer, onShowQr)
+            referral != null -> Invite(referral, publicOrigin, sharer, wallet, onShowQr)
             snapshot.needsPublicName -> NamePrompt(model)
             else -> UnavailableLine("Your invite link", "invite-unavailable")
         }
@@ -243,7 +249,7 @@ private fun InviteCard(model: EngagementModel, snapshot: EngagementSnapshot, pub
 }
 
 @Composable
-private fun Invite(referral: ReferralInfo, publicOrigin: String, sharer: ReferralShareAction, onShowQr: () -> Unit) {
+private fun Invite(referral: ReferralInfo, publicOrigin: String, sharer: ReferralShareAction, wallet: WalletPassModel?, onShowQr: () -> Unit) {
     var copied by remember { mutableStateOf(false) }
     Text("Your code: ${referral.code}", modifier = Modifier.testTag("referral-code"))
     referral.totalConverted?.let { total ->
@@ -257,6 +263,7 @@ private fun Invite(referral: ReferralInfo, publicOrigin: String, sharer: Referra
             modifier = Modifier.heightIn(min = 48.dp).testTag("copy-invite"),
         ) { Text(if (copied) "Copied" else "Copy link") }
         OutlinedButton(onClick = onShowQr, modifier = Modifier.heightIn(min = 48.dp).testTag("show-qr")) { Text("Show QR") }
+        wallet?.let { WalletPassButton(it) }
         Text(link, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("invite-link"))
     } else {
         Text("Invite links aren’t available in this build.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("invite-unconfigured"))

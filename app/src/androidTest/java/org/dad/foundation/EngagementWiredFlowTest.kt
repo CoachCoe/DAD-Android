@@ -64,7 +64,7 @@ class EngagementWiredFlowTest {
     @Test fun badgesShowEarnedAndLockedInTextWithAPerkAndInviteOnlyAccess() {
         openEngagement().use {
             waitFor("badge-summary")
-            textOf("badge-summary", "3 of 8 earned")
+            textOf("badge-summary", "4 of 9 earned")
             compose.onNodeWithTag("badge-invite-access").performScrollTo().assertIsDisplayed()
             // Earned Founding Donor carries its perk as copy (the server sends a key); locked Team Captain shows its rule.
             compose.onNodeWithTag("badge-earned-F").performScrollTo().assertIsDisplayed()
@@ -72,6 +72,8 @@ class EngagementWiredFlowTest {
             compose.onNodeWithTag("badge-locked-TC").performScrollTo().assertIsDisplayed()
             textOf("badge-locked-TC", "20 converted referrals")
             textOf("badge-locked-TC", "Locked")
+            compose.onNodeWithTag("badge-earned-CITY50").performScrollTo().assertIsDisplayed()
+            textOf("badge-earned-CITY50", "Top 50 in Chicago")
         }
     }
 
@@ -141,6 +143,14 @@ class EngagementWiredFlowTest {
             compose.onNodeWithTag("qr-code").assertIsDisplayed()
             tap("qr-close")
             waitFor("engagement-home")
+        }
+    }
+
+    @Test fun aWalletPassThatCannotBePreparedSaysTheCodeStillWorks() {
+        openEngagement().use {
+            waitFor("wallet-add")
+            tap("wallet-add")
+            textOf("wallet-error", "on-screen code still works")
         }
     }
 

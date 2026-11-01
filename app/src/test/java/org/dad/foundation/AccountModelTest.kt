@@ -93,6 +93,21 @@ class AccountModelTest {
         assertEquals(AccountFailure.InvalidConfiguration, runCatching { m.establish()({ validCredentials() }) }.exceptionOrNull())
     }
 
+    @Test fun signupAndRecoveryLinksClaimNativelyAndOpenTheirReturnDestination() = runTest {
+        val policy = javaClass.getResourceAsStream("/links.json")!!.bufferedReader().use { it.readText() }
+        val router = LinkRouter("https://public.test", policy)
+        for (target in listOf(AccountDestination.DASHBOARD, AccountDestination.PAYMENT_METHOD)) {
+            val store = RecordingStore()
+            val m = model(store = store)
+            m.start(LaunchOptions(stubBackend = true))
+            val link = "https://public.test/account/claim#token=" + "A".repeat(43) + "&next=" + target.path
+            assertNull(m.receive(link, router))
+            assertTrue(m.hasSession)
+            assertEquals("claimed", store.value?.access)
+            assertEquals(target, m.destination)
+        }
+    }
+
     @Test fun aFailedClaimLinkWithNoSessionExplainsItself() = runTest {
         val api = object : AccountAPI {
             override suspend fun profile(access: String) = AccountProfile("a@b.c", null)

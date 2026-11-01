@@ -17,9 +17,13 @@ class ExternalSignInDeps(
 class AuthServices(
     val phone: SignInService,
     val signup: SignupService,
+    val link: SignInLinkService,
     val password: PasswordSignInService,
     val external: ExternalSignInDeps,
 )
+
+/** The partner journey: its own 12-hour session, the emailed-link sign-in and the portal. */
+class PartnerKit(val session: PartnerSession, val signIn: PartnerSignInService, val service: PartnerService)
 
 /** What the composition root hands the UI: the session plus the real (or, in DEBUG only, preview) services on it. */
 class AppServices(
@@ -27,6 +31,7 @@ class AppServices(
     val signIn: SignInService,
     val settings: SettingsService?,
     val signup: SignupService = UnconfiguredCredentialAuth,
+    val signInLink: SignInLinkService = UnconfiguredCredentialAuth,
     val passwordSignIn: PasswordSignInService = UnconfiguredCredentialAuth,
     val passwordSettings: PasswordSettingsService? = null,
     val external: ExternalSignInDeps = ExternalSignInDeps(),
@@ -34,6 +39,16 @@ class AppServices(
     val giving: GivingKit? = null,
     val events: EventsService? = null,
     val engagement: EngagementService? = null,
+    val management: AccountManagementService? = null,
+    val wallet: WalletPassService? = null,
+    val partner: PartnerKit? = null,
+    /** Opt-in usage analytics; null where nothing is ever sent (the synthetic preview). */
+    val analytics: AnalyticsUploader? = null,
+    val push: PushRegistration? = null,
+    /** Null until a push provider is linked; then the donor and partner register at every launch. */
+    val pushTokens: PushTokenProvider? = null,
+    /** Referral and company-code link visits, kept and spent as the website's cookies are; null in the preview. */
+    val links: LinkAttribution? = null,
 )
 
 /** DEBUG launch switches. Always all-false in a release build. */
@@ -56,6 +71,12 @@ data class LaunchOptions(
     val stubEngagement: StubEngagementScenario = StubEngagementScenario.STANDARD,
     /** Stub backend only (screenshot and UI-test aid): open the engagement screen straight from the donor home. */
     val stubOpenEngagement: Boolean = false,
+    /** Stub backend only: start with a stored partner session so the portal opens at once. */
+    val stubPartnerSignedIn: Boolean = false,
+    /** Stub backend only: the analytics question has not been answered yet (otherwise it starts declined). */
+    val stubAnalyticsUnset: Boolean = false,
+    /** Stub backend only: a push provider is linked, so the donor registers a token. */
+    val stubPush: Boolean = false,
 )
 
 /** What the DEBUG stub backend answers for the donor-home reads. */

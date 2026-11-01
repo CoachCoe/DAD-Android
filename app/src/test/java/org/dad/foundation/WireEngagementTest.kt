@@ -22,9 +22,9 @@ class WireEngagementTest {
 
     private val spendId = "11111111-1111-4111-8111-111111111111"
     private val readyDashboard = """{"state":"ready","computed_at":"2026-10-30T12:00:00Z","founding_donor":true,"referrals":{"irl":1,"link":2,"total_minor":12000},"streak":null,"rank":{"national_percentile":2,"city":"Austin","city_rank":4},"rankings_opted_out":false,"network":null,"impact":{"given_minor":124000,"initiatives_funded":4,"events_volunteered":2}}"""
-    private val badgesJson = """{"badges":[{"code":"F","title":"Founding Donor","rule":"Started early","perk":"FOUNDING_EVENTS","earned":true,"earned_at":"2026-06-01T00:00:00Z","artwork":"x"},{"code":"TC","title":"Team Captain","rule":"20 referrals","perk":"TEAM_CAPTAIN","earned":false,"earned_at":null,"artwork":"x"},{"code":"Z","title":"New one","rule":"r","perk":"BRAND_NEW_KEY","earned":false,"earned_at":null,"artwork":"x"},{"code":"","title":"Blank code","rule":"r","perk":"","earned":false,"artwork":"x"}]}"""
+    private val badgesJson = """{"badges":[{"code":"F","title":"Founding Donor","rule":"Started early","perk":"FOUNDING_EVENTS","earned":true,"earned_at":"2026-06-01T00:00:00Z","artwork":"x","city":null,"display_title":"Founding Donor"},{"code":"TC","title":"Team Captain","rule":"20 referrals","perk":"TEAM_CAPTAIN","earned":false,"earned_at":null,"artwork":"x","city":null,"display_title":"Team Captain"},{"code":"CITY50","title":"Top 50 City","rule":"Top 50 in your city","perk":"","earned":true,"earned_at":"2026-07-01T00:00:00Z","artwork":"x","city":"Chicago","display_title":"Top 50 in Chicago"},{"code":"CITYLOCK","title":"Top 50 City","rule":"Top 50 in your city","perk":"","earned":false,"earned_at":null,"artwork":"x","city":"Chicago","display_title":"Top 50 in Chicago"},{"code":"CITYBLANK","title":"Top 50 City","rule":"r","perk":"","earned":true,"earned_at":"2026-07-01T00:00:00Z","artwork":"x","city":"Austin","display_title":""},{"code":"Z","title":"New one","rule":"r","perk":"BRAND_NEW_KEY","earned":false,"earned_at":null,"artwork":"x"},{"code":"","title":"Blank code","rule":"r","perk":"","earned":false,"artwork":"x"}]}"""
     private val networkJson = """{"active_count":5,"annualized_minor":348000,"next_milestone":{"label":"Brought 12 In","target":12,"remaining":7},"invitees":[{"name":"Jordan M.","active":true}],"anonymous_active":2}"""
-    private val sharingJson = """{"public_name":"Alex C.","link":"https://elsewhere.example/r/ALEX2026","irl_link":"https://elsewhere.example/r/ALEX2026?via=irl"}"""
+    private val sharingJson = """{"public_name":"Alex C.","link":"https://elsewhere.example/r/ALEX2026","irl_link":"https://elsewhere.example/r/ALEX2026?via=irl","referral_code":"ALEX2026"}"""
     private val conversionsJson = """{"conversions":[{"converted_at":"2026-10-20T12:00:00Z","kind":"LINK"},{"converted_at":"2026-10-12T12:00:00Z","kind":"BRAND_NEW_KIND"}],"more":true}"""
 
     private fun happy(r: Recorded): Pair<Int, String> = when (r.path) {
@@ -45,9 +45,9 @@ class WireEngagementTest {
         assertEquals("$1,240", snapshot.impact?.givenLabel)
         assertEquals("Top 2% nationally", snapshot.ranking?.nationalLabel)
         // Only the filtered, mapped badges: the blank-code row is dropped, perk keys become copy.
-        assertEquals(listOf("F", "TC", "Z"), snapshot.badges!!.badges.map { it.code })
+        assertEquals(listOf("F", "TC", "CITY50", "CITYLOCK", "CITYBLANK", "Z"), snapshot.badges!!.badges.map { it.code })
         assertEquals("Invite-only founding events", snapshot.badges!!.badges[0].perk)
-        assertEquals("Unlocks a member perk", snapshot.badges!!.badges[2].perk)
+        assertEquals("Unlocks a member perk", snapshot.badges!!.badges[5].perk)
         assertTrue(snapshot.badges!!.hasInviteOnlyAccess)
         assertEquals(5L, snapshot.network?.activeCount)
         assertEquals(2L, snapshot.network?.anonymousActive)
@@ -62,6 +62,22 @@ class WireEngagementTest {
     @Test fun theInviteLinkIsNeverTakenFromTheServerHost() = runTest {
         val snapshot = Rig(backgroundScope, ::happy).wire.snapshot()
         assertEquals("https://dad.org/r/ALEX2026", snapshot.referral?.link("https://dad.org"))
+    }
+
+    @Test fun theDisplayedCodeIsTheReferralCodeFieldNotTheLinkPath() = runTest {
+        val sharing = """{"public_name":"Alex","link":"https://x.example/join?ref=A","irl_link":"https://x.example/join?via=irl","referral_code":"REAL42"}"""
+        val snapshot = Rig(backgroundScope) { r -> if (r.path == "/donor/me/sharing") 200 to sharing else happy(r) }.wire.snapshot()
+        assertEquals("REAL42", snapshot.referral?.code)
+    }
+
+    @Test fun earnedCityBadgeShowsItsDisplayTitleAndLockedKeepsTheGenericTitle() = runTest {
+        val badges = Rig(backgroundScope, ::happy).wire.snapshot().badges!!.badges.associateBy { it.code }
+        assertEquals("Chicago", badges.getValue("CITY50").city)
+        assertEquals("Top 50 in Chicago", badges.getValue("CITY50").shownTitle)
+        assertEquals("Top 50 City", badges.getValue("CITYLOCK").shownTitle)
+        assertEquals("Top 50 City", badges.getValue("CITYBLANK").shownTitle)
+        assertEquals("Founding Donor", badges.getValue("F").shownTitle)
+        assertNull(badges.getValue("F").city)
     }
 
     @Test fun aFailedSectionIsNullNotZero() = runTest {
@@ -110,7 +126,7 @@ class WireEngagementTest {
     }
 
     @Test fun noPublicNameMeansNeedsNameAndNoConversionsRead() = runTest {
-        val rig = Rig(backgroundScope) { r -> if (r.path == "/donor/me/sharing") 200 to """{"public_name":null,"link":null,"irl_link":null}""" else happy(r) }
+        val rig = Rig(backgroundScope) { r -> if (r.path == "/donor/me/sharing") 200 to """{"public_name":null,"link":null,"irl_link":null,"referral_code":null}""" else happy(r) }
         val snapshot = rig.wire.snapshot()
         assertTrue(snapshot.needsPublicName)
         assertNull(snapshot.referral)
@@ -118,7 +134,7 @@ class WireEngagementTest {
     }
 
     @Test fun anUnusableLinkIsAnUnavailableInviteNotANamePrompt() = runTest {
-        val odd = """{"public_name":"Alex","link":"https://x.example/join?ref=A","irl_link":null}"""
+        val odd = """{"public_name":"Alex","link":"https://x.example/join?ref=A","irl_link":null,"referral_code":null}"""
         val snapshot = Rig(backgroundScope) { r -> if (r.path == "/donor/me/sharing") 200 to odd else happy(r) }.wire.snapshot()
         assertNull(snapshot.referral)
         assertFalse(snapshot.needsPublicName)

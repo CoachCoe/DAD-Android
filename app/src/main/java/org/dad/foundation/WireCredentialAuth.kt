@@ -7,6 +7,7 @@ import org.dad.foundation.generated.api.AccountApi
 import org.dad.foundation.generated.api.DonorApi
 import org.dad.foundation.generated.model.PostDonorMePasswordRequest
 import org.dad.foundation.generated.model.PostDonorPasswordSignInRequest
+import org.dad.foundation.generated.model.LoginRequest
 import org.dad.foundation.generated.model.PostDonorSignupRequest
 import retrofit2.Response
 import retrofit2.http.Body
@@ -23,8 +24,8 @@ private interface SignupEndpoint {
 }
 
 /**
- * Unauthenticated credential flows over the generated client: email signup (`postDonorSignup`) and
- * email + password sign-in (`postDonorPasswordSignIn`). Same shape as [WireAuth]: sign-in returns
+ * Unauthenticated credential flows over the generated client: email signup (`postDonorSignup`), an emailed
+ * sign-in link (`login`) and email + password sign-in (`postDonorPasswordSignIn`). Same shape as [WireAuth]: sign-in returns
  * credentials but never stores them; the caller passes the call to [AccountSession.establish]. No
  * password is ever logged or placed in an error.
  */
@@ -32,7 +33,7 @@ class WireCredentialAuth(
     origin: String,
     private val deviceName: String? = null,
     private val baseClient: OkHttpClient = defaultNativeClient(),
-) : SignupService, PasswordSignInService {
+) : SignupService, SignInLinkService, PasswordSignInService {
     private val url: HttpUrl = validatedOrigin(origin)
     private fun retrofit() = nativeRetrofit(url, baseClient)
 
@@ -41,6 +42,11 @@ class WireCredentialAuth(
             .signup(PostDonorSignupRequest(name = form.name, email = form.email, zip = form.zip, city = form.city))
         response.checked()
         response.body()?.close()
+    }
+
+    /** No `next`: the app claims the link itself rather than handing the donor to a web page. */
+    override suspend fun requestSignInLink(email: String) {
+        decoding { retrofit().create(AccountApi::class.java).login(LoginRequest(email = email)).requireBody() }
     }
 
     override suspend fun signIn(email: String, password: String): Credentials = decoding {

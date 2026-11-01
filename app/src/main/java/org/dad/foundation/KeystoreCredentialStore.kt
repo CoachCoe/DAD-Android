@@ -14,9 +14,14 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-class KeystoreCredentialStore(context: Context) : CredentialStore {
-    private val file = AtomicFile(File(context.noBackupFilesDir, "donor-session.enc"))
-    private val alias = context.packageName + ".donor-session"
+/** [name] keeps each session apart (the donor's, the partner's); a [refreshable] session must carry a refresh token. */
+class KeystoreCredentialStore(
+    context: Context,
+    name: String = "donor-session",
+    private val refreshable: Boolean = true,
+) : CredentialStore {
+    private val file = AtomicFile(File(context.noBackupFilesDir, "$name.enc"))
+    private val alias = context.packageName + ".$name"
     private val gson = Gson()
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -42,7 +47,7 @@ class KeystoreCredentialStore(context: Context) : CredentialStore {
         cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, raw.copyOfRange(0, 12)))
         cipher.updateAAD(alias.toByteArray())
         val value = gson.fromJson(String(cipher.doFinal(raw.copyOfRange(12, raw.size)), Charsets.UTF_8), Credentials::class.java)
-        require(value != null && !value.access.isNullOrBlank() && !value.refresh.isNullOrBlank()) { "Invalid stored session" }
+        require(value != null && !value.access.isNullOrBlank() && (!refreshable || !value.refresh.isNullOrBlank())) { "Invalid stored session" }
         return value
     }
     @Synchronized override fun save(value: Credentials) {

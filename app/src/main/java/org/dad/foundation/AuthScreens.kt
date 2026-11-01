@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,7 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.activity.compose.BackHandler
 
-private enum class AuthStep { RoleSelect, Methods, Phone, Password, Signup, Partner }
+private enum class AuthStep { RoleSelect, Methods, Phone, EmailLink, Password, Signup, Partner }
 
 /**
  * The unauthenticated stack: role select -> sign-in methods -> the chosen method's flow. Verification
@@ -41,33 +42,57 @@ private enum class AuthStep { RoleSelect, Methods, Phone, Password, Signup, Part
 @Composable
 fun UnauthenticatedStack(
     notice: String?,
+    /** "<name> invited you", after an invite link was opened before sign-in. */
+    invitation: String? = null,
     auth: AuthServices,
     establish: Establish,
     generation: Int,
     onSignedIn: () -> Unit,
     /** Claims a sign-in link pasted by the donor; false when the text is not a DAD sign-in link. */
     onPastedLink: (String) -> Boolean = { false },
+    partnerSignIn: PartnerSignInService? = null,
+    /** A tapped partner sign-in link's token, accepted on the partner sign-in screen. */
+    partnerToken: String? = null,
+    onPartnerTokenConsumed: () -> Unit = {},
+    onPartnerSignedIn: () -> Unit = {},
+    analytics: AnalyticsUploader? = null,
+    /** The configured public site; blank where none is configured. */
+    publicOrigin: String = "",
 ) {
     var step by rememberSaveable { mutableStateOf(AuthStep.RoleSelect) }
+    LaunchedEffect(partnerToken) { if (partnerToken != null) step = AuthStep.Partner }
     BackHandler(enabled = step != AuthStep.RoleSelect) {
-        step = if (step == AuthStep.Phone || step == AuthStep.Password || step == AuthStep.Signup) AuthStep.Methods else AuthStep.RoleSelect
+        step = if (step == AuthStep.Phone || step == AuthStep.EmailLink || step == AuthStep.Password || step == AuthStep.Signup) AuthStep.Methods
+        else AuthStep.RoleSelect
     }
     when (step) {
-        AuthStep.RoleSelect -> RoleSelect(notice) { role -> step = if (role == AppRole.DONOR) AuthStep.Methods else AuthStep.Partner }
+        AuthStep.RoleSelect -> RoleSelect(notice, analytics, invitation) { role ->
+            analytics?.emit(AnalyticsEvent.Plain(PlainEvent.ROLE_SELECTED))
+            step = if (role == AppRole.DONOR) AuthStep.Methods else AuthStep.Partner
+        }
         AuthStep.Methods -> SignInMethods(
             auth.external, establish, generation, onSignedIn,
-            onPhone = { step = AuthStep.Phone }, onPassword = { step = AuthStep.Password }, onSignup = { step = AuthStep.Signup },
+            onPhone = { step = AuthStep.Phone }, onEmailLink = { step = AuthStep.EmailLink }, onPassword = { step = AuthStep.Password },
+            onSignup = { step = AuthStep.Signup },
             onBack = { step = AuthStep.RoleSelect })
         AuthStep.Phone -> PhoneSignIn(
             // Keyed by session generation so a model that ended in SignedIn is never reused for the next sign-in.
             viewModel(key = "phone-sign-in-$generation", factory = PhoneSignInModel.factory(auth.phone, establish)), onSignedIn)
+        AuthStep.EmailLink -> EmailLinkFlow(
+            viewModel(key = "email-link-$generation", factory = SignInLinkModel.factory(auth.link)),
+            onPastedLink, notice, onBack = { step = AuthStep.Methods })
         AuthStep.Password -> PasswordSignInFlow(
             viewModel(key = "password-sign-in-$generation", factory = PasswordSignInModel.factory(auth.password, establish)),
             onSignedIn, onBack = { step = AuthStep.Methods })
         AuthStep.Signup -> SignupFlow(
             viewModel(key = "signup-$generation", factory = SignupModel.factory(auth.signup)),
             onPastedLink, notice, onBack = { step = AuthStep.Methods })
-        AuthStep.Partner -> PartnerSignInNotice(onBack = { step = AuthStep.RoleSelect })
+        AuthStep.Partner -> if (partnerSignIn != null) PartnerSignInFlow(
+            viewModel(key = "partner-sign-in-$generation", factory = PartnerSignInModel.factory(partnerSignIn)),
+            incomingToken = partnerToken, onTokenConsumed = onPartnerTokenConsumed,
+            onBack = { step = AuthStep.RoleSelect }, onSignedIn = onPartnerSignedIn,
+            applyUrl = publicOrigin.takeIf { it.isNotBlank() }?.let { "${it.trimEnd('/')}/apply" },
+        ) else RoleSelect(PhoneSignInModel.NOT_CONFIGURED) { role -> if (role == AppRole.DONOR) step = AuthStep.Methods }
     }
 }
 
@@ -82,7 +107,7 @@ internal fun AuthColumn(tag: String, content: @Composable () -> Unit) {
 /** Unauthenticated splash: pick a journey before signing in. Shows [notice] (a failed link, a revoked
  *  session, or an unconfigured build) so the reason for being here is never silent. */
 @Composable
-fun RoleSelect(notice: String?, onSelect: (AppRole) -> Unit) {
+fun RoleSelect(notice: String?, analytics: AnalyticsUploader? = null, invitation: String? = null, onSelect: (AppRole) -> Unit) {
     AuthColumn("role-select") {
         Text("DAD", style = MaterialTheme.typography.displayMedium, modifier = Modifier.dadHeading())
         Spacer(Modifier.height(16.dp))
@@ -92,22 +117,46 @@ fun RoleSelect(notice: String?, onSelect: (AppRole) -> Unit) {
             Text(notice, style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.testTag("auth-notice").semantics { liveRegion = LiveRegionMode.Polite })
         }
+        if (invitation != null) {
+            Spacer(Modifier.height(16.dp))
+            Text(invitation, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.testTag("auth-invitation"))
+        }
         Spacer(Modifier.height(28.dp))
         DadPrimaryButton("I’m a donor", Modifier.testTag("role-donor")) { onSelect(AppRole.DONOR) }
         Spacer(Modifier.height(12.dp))
         DadPrimaryButton("I’m a partner", Modifier.testTag("role-partner")) { onSelect(AppRole.PARTNER) }
+        if (analytics != null && analytics.choice == null) {
+            Spacer(Modifier.height(28.dp))
+            AnalyticsChoice(analytics)
+        }
     }
 }
+
+/** The first-launch analytics question, worded as on the website; the answer can be changed in Settings. */
+@Composable
+private fun AnalyticsChoice(analytics: AnalyticsUploader) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.testTag("analytics-choice")) {
+        Text(ANALYTICS_EXPLAINER, style = MaterialTheme.typography.bodySmall)
+        OutlinedButton(onClick = { analytics.choose(true) }, modifier = Modifier.fillMaxWidth().testTag("analytics-allow")) { Text("Allow usage analytics") }
+        OutlinedButton(onClick = { analytics.choose(false) }, modifier = Modifier.fillMaxWidth().testTag("analytics-decline")) { Text("Decline usage analytics") }
+    }
+}
+
+internal const val ANALYTICS_EXPLAINER = "Allow first-party usage analytics? DAD uses a temporary journey ID to measure signup, sharing and " +
+    "giving. No names, email addresses or payment details are sent. Observations are kept for 13 months. You can change this " +
+    "choice in Settings."
 
 @Composable
 private fun SignInMethods(
     external: ExternalSignInDeps, establish: Establish, generation: Int, onSignedIn: () -> Unit,
-    onPhone: () -> Unit, onPassword: () -> Unit, onSignup: () -> Unit, onBack: () -> Unit,
+    onPhone: () -> Unit, onEmailLink: () -> Unit, onPassword: () -> Unit, onSignup: () -> Unit, onBack: () -> Unit,
 ) {
     AuthColumn("sign-in-methods") {
         Text("Sign in", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
         Spacer(Modifier.height(20.dp))
         DadPrimaryButton("Sign in with your phone", Modifier.testTag("method-phone"), onPhone)
+        Spacer(Modifier.height(12.dp))
+        DadPrimaryButton("Email me a sign-in link", Modifier.testTag("method-email-link"), onEmailLink)
         Spacer(Modifier.height(12.dp))
         DadPrimaryButton("Sign in with email and password", Modifier.testTag("method-password"), onPassword)
         Spacer(Modifier.height(12.dp))
@@ -123,18 +172,6 @@ private fun SignInMethods(
     }
 }
 
-/** Partner sign-in is an emailed-link flow that lands with the partner wiring phase; say so rather
- *  than offering a donor phone sign-in under a partner label. */
-@Composable
-private fun PartnerSignInNotice(onBack: () -> Unit) {
-    AuthColumn("partner-sign-in-notice") {
-        Text("Partner sign-in", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
-        Spacer(Modifier.height(16.dp))
-        Text("Partner sign-in isn’t available in the app yet. Use the DAD website to sign in as a partner.")
-        Spacer(Modifier.height(16.dp))
-        Button(onClick = onBack, modifier = Modifier.testTag("partner-back")) { Text("Back") }
-    }
-}
 
 /** Phone + SMS one-time-code journey, bound to [PhoneSignInModel]. */
 @Composable

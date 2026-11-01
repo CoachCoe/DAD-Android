@@ -132,6 +132,9 @@ class AccountModel(
     /** A line for the unauthenticated screen: a failed sign-in link, an ended session, or an unconfigured build. */
     var notice: String? by mutableStateOf(null)
         private set
+    /** "<name> invited you", after an invite link was opened before sign-in. */
+    var invitation: String? by mutableStateOf(null)
+        private set
     /** Bumped on every sign-in/sign-out so per-session view models are never reused across sessions. */
     var generation: Int by mutableIntStateOf(0)
         private set
@@ -141,7 +144,7 @@ class AccountModel(
     // must recompose when they arrive (otherwise Settings and the donor home never appear).
     var settings: SettingsService? by mutableStateOf(null)
         private set
-    var auth: AuthServices = AuthServices(UnconfiguredSignIn, UnconfiguredCredentialAuth, UnconfiguredCredentialAuth, ExternalSignInDeps())
+    var auth: AuthServices = AuthServices(UnconfiguredSignIn, UnconfiguredCredentialAuth, UnconfiguredCredentialAuth, UnconfiguredCredentialAuth, ExternalSignInDeps())
         private set
     var passwordSettings: PasswordSettingsService? by mutableStateOf(null)
         private set
@@ -152,6 +155,26 @@ class AccountModel(
     var events: EventsService? by mutableStateOf(null)
         private set
     var engagement: EngagementService? by mutableStateOf(null)
+        private set
+    var management: AccountManagementService? by mutableStateOf(null)
+        private set
+    var wallet: WalletPassService? by mutableStateOf(null)
+        private set
+    var partner: PartnerKit? by mutableStateOf(null)
+        private set
+    var analytics: AnalyticsUploader? by mutableStateOf(null)
+        private set
+    var pushTokens: PushTokenProvider? by mutableStateOf(null)
+        private set
+    /** A screen a tapped notification or link asked for, opened by the donor shell once signed in. */
+    var destination: AccountDestination? by mutableStateOf(null)
+        private set
+    private var pushRegistered = false
+    /** A partner session is in use (and no donor one): the root shows the partner portal. */
+    var partnerSignedIn: Boolean by mutableStateOf(false)
+        private set
+    /** A tapped partner sign-in link waiting for the partner sign-in screen to accept it. */
+    var pendingPartnerToken: String? by mutableStateOf(null)
         private set
     private var loading = false
     private var pendingProof: String? = null
@@ -174,7 +197,8 @@ class AccountModel(
             withContext(io) { factory(CoroutineScope(viewModelScope.coroutineContext + io), options) }
                 .also {
                     services = it; signIn = it.signIn; settings = it.settings; passwordSettings = it.passwordSettings; dashboard = it.dashboard; giving = it.giving; events = it.events; engagement = it.engagement
-                    auth = AuthServices(it.signIn, it.signup, it.passwordSignIn, it.external)
+                    management = it.management; wallet = it.wallet; partner = it.partner; analytics = it.analytics; pushTokens = it.pushTokens
+                    auth = AuthServices(it.signIn, it.signup, it.signInLink, it.passwordSignIn, it.external)
                 }
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) {
@@ -191,7 +215,11 @@ class AccountModel(
         viewModelScope.launch {
             val active = ensureServices()
             hasSession = active != null && active.session.isSignedIn()
+            // Without a donor session, a partner session still within its 12 hours reopens the portal.
+            partnerSignedIn = !hasSession && active?.partner?.session?.isSignedIn == true
             booted = true
+            active?.analytics?.emit(AnalyticsEvent.Plain(PlainEvent.APP_OPENED))
+            if (hasSession) gate.signedIn()?.let { destination = it }
             if (hasSession) load() else state = if (active == null) AccountState.Unavailable else AccountState.SignedOut
         }
     }
@@ -199,7 +227,8 @@ class AccountModel(
     /** A sign-in completed (the session already holds the credentials): enter the donor shell. */
     fun onSignedIn() {
         notice = null
-        gate.signedIn()
+        gate.signedIn()?.let { destination = it }
+        pushRegistered = false
         generation++
         hasSession = true
         load()
@@ -208,6 +237,8 @@ class AccountModel(
     /** Sign-out, account deletion or a revoked session: back to sign-in. */
     fun onSignedOut(message: String? = null) {
         notice = message
+        pushRegistered = false
+        destination = null
         generation++
         hasSession = false
         state = AccountState.SignedOut
@@ -228,8 +259,11 @@ class AccountModel(
                     active.session.profile()
                 }
                 notice = null
+                invitation = null
                 hasSession = true
                 state = AccountState.Ready(profile)
+                registerPush(active)
+                active.links?.let { links -> viewModelScope.launch(io) { links.bindCompany() } }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: AccountFailure.SignedOut) {
                 // Revoked or expired for good: the session cleared itself, so return to sign-in.
@@ -244,29 +278,87 @@ class AccountModel(
             finally {
                 loading = false
                 if (claim != null) {
-                    if (claimed) { completedProof = activeProof; gate.signedIn(); generation++ }
+                    if (claimed) { completedProof = activeProof; gate.signedIn()?.let { destination = it }; generation++ }
                     activeProof = null
                 }
                 pendingProof?.let { pendingProof = null; load(claim = it) }
             }
         }
     }
+    fun onPartnerSignedIn() {
+        notice = null
+        generation++
+        partnerSignedIn = true
+    }
+
+    /** Best-effort, once per sign-in and launch: platforms rotate tokens, so the server wants every launch. */
+    private fun registerPush(active: AppServices) {
+        val push = active.push ?: return
+        val tokens = active.pushTokens ?: return
+        if (pushRegistered) return
+        pushRegistered = true
+        viewModelScope.launch(io) {
+            try { tokens.token()?.let { push.register(it) } }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { pushRegistered = false }
+        }
+    }
+
+    /** A tapped notification: counted (`push_opened`), then its screen is opened, after sign-in if need be. */
+    fun openNotification(tap: PushTap, router: LinkRouter?) {
+        analytics?.emit(AnalyticsEvent.PushOpened(tap.category))
+        val target = tap.path?.let { router?.notification(it) } ?: return
+        gate.receive(target, hasSession)?.let { destination = it }
+    }
+
+    fun destinationOpened() { destination = null }
+
+    fun onPartnerSignedOut() {
+        generation++
+        partnerSignedIn = false
+    }
+
+    fun partnerTokenConsumed() { pendingPartnerToken = null }
+
     fun configurationUnavailable() { hasSession = false; notice = PhoneSignInModel.NOT_CONFIGURED; state = AccountState.Unavailable }
     fun receive(value: String, router: LinkRouter): String? {
         return when (val intent = router.route(value)) {
-            is LinkIntent.Account -> if (intent.destination == AccountDestination.PROFILE) {
-                gate.receive(intent.destination, state is AccountState.Ready)
+            is LinkIntent.Account -> if (!partnerSignedIn) {
+                gate.receive(intent.destination, state is AccountState.Ready)?.let { destination = it }
                 if (hasSession) load()
                 null
             } else value
             is LinkIntent.Claim -> {
-                if (intent.next != null || (BuildConfig.DAD_API_ORIGIN.isBlank() && !options.stubBackend)) value
+                if (partnerSignedIn || (BuildConfig.DAD_API_ORIGIN.isBlank() && !options.stubBackend)) value
                 else {
                     val digest = java.security.MessageDigest.getInstance("SHA-256").digest(intent.token.toByteArray()).joinToString("") { "%02x".format(it) }
-                    if (activeProof == null && completedProof != digest) { activeProof = digest; load(claim = intent.token) }
+                    if (activeProof == null && completedProof != digest) {
+                        activeProof = digest
+                        intent.next?.let { gate.receive(it, false) }
+                        load(claim = intent.token)
+                    }
                     null
                 }
             }
+            // A partner already in the portal stays put; a donor's app cannot also be a partner's, so the website
+            // takes the link.
+            is LinkIntent.PartnerSignIn -> when {
+                partnerSignedIn -> null
+                hasSession -> value
+                else -> { pendingPartnerToken = intent.token; null }
+            }
+            is LinkIntent.Referral -> viewModelScope.launch {
+                val links = ensureServices()?.links ?: return@launch
+                val name = withContext(io) { links.captureReferral(intent.code, intent.inPerson) }
+                if (name != null && state !is AccountState.Ready) invitation = "$name invited you to give with DAD."
+            }.let { null }
+            is LinkIntent.Company -> viewModelScope.launch {
+                val links = ensureServices()?.links ?: return@launch
+                withContext(io) {
+                    links.captureCompany(intent.code)
+                    if (hasSession) links.bindCompany()
+                }
+            }.let { null }
             is LinkIntent.EmailChange, is LinkIntent.Web -> value
             null -> null
         }
@@ -283,6 +375,8 @@ private fun tokenColor(name: String) = Color(DADTokens.color.getValue(name).toCo
 class MainActivity : ComponentActivity() {
     private var incomingLink: String? = null
     private var linkEvent by mutableIntStateOf(0)
+    private var incomingTap: PushTap? = null
+    private var tapEvent by mutableIntStateOf(0)
     /** The configured public origin invite links are built from; blank means none (no link is ever invented). */
     private val linkPublicOrigin by lazy {
         BuildConfig.DAD_PUBLIC_ORIGIN.ifBlank { if (BuildConfig.DEBUG && intent.getBooleanExtra("stub_backend", false)) DebugBackend.PUBLIC_ORIGIN else "" }
@@ -296,6 +390,8 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         incomingLink = intent.dataString
         linkEvent++
+        incomingTap = PushTap.from(intent.getStringExtra("category"), intent.getStringExtra("path"))
+        tapEvent++
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -338,6 +434,9 @@ class MainActivity : ComponentActivity() {
                 else -> StubEngagementScenario.STANDARD
             },
             stubOpenEngagement = BuildConfig.DEBUG && intent.getBooleanExtra("stub_open_engagement", false),
+            stubPartnerSignedIn = BuildConfig.DEBUG && intent.getBooleanExtra("stub_partner_signed_in", false),
+            stubAnalyticsUnset = BuildConfig.DEBUG && intent.getBooleanExtra("stub_analytics_unset", false),
+            stubPush = BuildConfig.DEBUG && intent.getBooleanExtra("stub_push", false),
         )
         val giving = BuildConfig.DEBUG && intent.getBooleanExtra("preview_giving", false)
         val impact = BuildConfig.DEBUG && (intent.getBooleanExtra("preview_impact", false) || intent.getBooleanExtra("preview_network", false))
@@ -345,9 +444,9 @@ class MainActivity : ComponentActivity() {
         val settings = BuildConfig.DEBUG && intent.getBooleanExtra("preview_settings", false)
         val partner = BuildConfig.DEBUG && intent.getBooleanExtra("preview_partner", false)
         val partnerViewer = BuildConfig.DEBUG && intent.getBooleanExtra("preview_partner_viewer", false)
-        val partnerPending = BuildConfig.DEBUG && intent.getBooleanExtra("preview_partner_pending", false)
         val appContext = applicationContext
         incomingLink = intent.dataString
+        incomingTap = PushTap.from(intent.getStringExtra("category"), intent.getStringExtra("path"))
         val factory = viewModelFactory {
             initializer {
                 AccountModel(factory = factory@{ scope, options ->
@@ -360,23 +459,38 @@ class MainActivity : ComponentActivity() {
                         // the synthetic fallback.
                         check(BuildConfig.DEBUG) { "DAD_API_ORIGIN must be set for a release build" }
                         val session = AccountSession(PreviewAPI(options.unavailableFirst), PreviewStore(!options.signedOut), scope)
-                        AppServices(session, PreviewSignIn(), PreviewSessionSettings(session))
+                        AppServices(session, PreviewSignIn(), PreviewSessionSettings(session),
+                            partner = PartnerKit(PartnerSession(PreviewStore(signedIn = false)), PreviewPartnerSignIn, PreviewPartnerService()))
                     } else {
-                        val session = AccountSession(WireAPI(BuildConfig.DAD_API_ORIGIN), KeystoreCredentialStore(appContext), scope)
+                        val origin = BuildConfig.DAD_API_ORIGIN
+                        lateinit var session: AccountSession
+                        val analytics = AnalyticsUploader(PrefsAnalyticsConsent(appContext), WireAnalytics(origin, access = { session.accessToken() }), scope)
+                        val http = defaultNativeClient().newBuilder().addInterceptor(AnalyticsObserver(analytics)).build()
+                        session = AccountSession(WireAPI(origin, http), KeystoreCredentialStore(appContext), scope)
                         val attribution = PrefsAttributionStore(appContext)
-                        val credentialAuth = WireCredentialAuth(BuildConfig.DAD_API_ORIGIN, android.os.Build.MODEL)
-                        val external = WireExternalSignIn(BuildConfig.DAD_API_ORIGIN, android.os.Build.MODEL)
+                        val linkTokens = PrefsLinkTokenStore(appContext)
+                        val credentialAuth = WireCredentialAuth(origin, android.os.Build.MODEL, http)
+                        val external = WireExternalSignIn(origin, android.os.Build.MODEL, http)
                         AppServices(
                             session,
-                            WireAuth(BuildConfig.DAD_API_ORIGIN, android.os.Build.MODEL),
-                            WireSettings(ProductClient(BuildConfig.DAD_API_ORIGIN, session), onLocalWipe = { attribution.clear() }),
+                            WireAuth(origin, android.os.Build.MODEL, http),
+                            WireSettings(ProductClient(origin, session, http), onLocalWipe = { attribution.clear(); linkTokens.clear() }),
                             signup = credentialAuth,
+                            signInLink = credentialAuth,
                             passwordSignIn = credentialAuth,
-                            passwordSettings = WirePasswordSettings(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
-                            dashboard = WireDashboard(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
-                            giving = GivingKit(WireGiving(ProductClient(BuildConfig.DAD_API_ORIGIN, session))),
-                            events = WireEvents(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
-                            engagement = WireEngagement(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
+                            passwordSettings = WirePasswordSettings(ProductClient(origin, session, http)),
+                            dashboard = WireDashboard(ProductClient(origin, session, http)),
+                            giving = GivingKit(WireGiving(ProductClient(origin, session, http), referral = { linkTokens.load().referral })),
+                            events = WireEvents(ProductClient(origin, session, http)),
+                            engagement = WireEngagement(ProductClient(origin, session, http)),
+                            management = WireAccountManagement(ProductClient(origin, session, http)),
+                            wallet = WireWalletPass(ProductClient(origin, session, http)),
+                            partner = PartnerSession(KeystoreCredentialStore(appContext, "partner-session", refreshable = false)).let {
+                                PartnerKit(it, WirePartnerAuth(origin, it, http), WirePartner(origin, it, http))
+                            },
+                            analytics = analytics,
+                            push = WireDonorPush(ProductClient(origin, session, http)),
+                            links = LinkAttribution(WireLinkAttribution(origin, ProductClient(origin, session, http), http), linkTokens, analytics),
                             external = ExternalSignInDeps(
                                 // No Credential Manager provider is linked, so a configured ID alone never switches a method on.
                                 capabilities = SignInCapabilities.of(SignInConfig(BuildConfig.DAD_GOOGLE_WEB_CLIENT_ID, BuildConfig.DAD_PASSKEY_RP_ID)),
@@ -402,6 +516,10 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+            LaunchedEffect(tapEvent) {
+                incomingTap?.let { model.openNotification(it, linkRouter) }
+                incomingTap = null
+            }
             val dark = isSystemInDarkTheme()
             val primary = DadTheme.brandAccent(dark)
             val colors = if (dark) darkColorScheme(primary = primary, onPrimary = tokenColor("ink-deep"), background = tokenColor("ink-deep"))
@@ -413,18 +531,30 @@ class MainActivity : ComponentActivity() {
                     // A session-backed shell is the donor journey — the donor landing owns every
                     // account sub-state (loading / ready / unavailable / signed-out) and its own
                     // recovery, so stay on it. Only a genuinely session-less app goes to role-select.
-                    LaunchedEffect(model.booted, model.hasSession) {
-                        if (model.booted) { if (model.hasSession) router.signedIn(AppRole.DONOR) else router.signedOut() }
+                    LaunchedEffect(model.booted, model.hasSession, model.partnerSignedIn) {
+                        if (model.booted) {
+                            when {
+                                model.hasSession -> router.signedIn(AppRole.DONOR)
+                                model.partnerSignedIn -> router.signedIn(AppRole.PARTNER)
+                                else -> router.signedOut()
+                            }
+                        }
                         root = router.root
                     }
+                    val partnerKit = model.partner
                     when (val current = root) {
+                        is RoleRouter.Root.Authenticated if current.role == AppRole.PARTNER && partnerKit != null && !partner && !partnerViewer ->
+                            PartnerPortal(
+                                viewModel(key = "partner-${model.generation}", factory = PartnerModel.factory(partnerKit.service)),
+                                publicOrigin = linkPublicOrigin,
+                                onSignedOut = { model.onPartnerSignedOut() },
+                                pushTokens = model.pushTokens,
+                            )
                         is RoleRouter.Root.Restoring, is RoleRouter.Root.Authenticated ->
-                            if (partnerPending) {
-                                PartnerPortal(viewModel(factory = PartnerModel.previewFactory(pending = true)))
-                            } else if (partnerViewer) {
-                                PartnerPortal(viewModel(factory = PartnerModel.previewFactory(role = PartnerRole.VIEWER)))
+                            if (partnerViewer) {
+                                PartnerPortal(viewModel(factory = PartnerModel.previewFactory(role = PartnerRole.VIEWER)), publicOrigin = "https://dad.example")
                             } else if (partner) {
-                                PartnerPortal(viewModel(factory = PartnerModel.previewFactory()))
+                                PartnerPortal(viewModel(factory = PartnerModel.previewFactory()), publicOrigin = "https://dad.example")
                             } else if (giving) {
                                 // Giving preview exercises the signed-in GiftScreen directly. The
                                 // donor shell reaches Restoring/Authenticated immediately (hasSession
@@ -445,11 +575,18 @@ class MainActivity : ComponentActivity() {
                             }
                         is RoleRouter.Root.Unauthenticated -> UnauthenticatedStack(
                             notice = model.notice,
+                            invitation = model.invitation,
                             auth = model.auth,
                             establish = model.establish(),
                             onPastedLink = { text -> linkRouter?.let { router -> PastedLink.claimToken(text, router)?.let { model.receive(text.trim(), router); true } } ?: false },
                             generation = model.generation,
                             onSignedIn = { model.onSignedIn() },
+                            partnerSignIn = model.partner?.signIn,
+                            partnerToken = model.pendingPartnerToken,
+                            onPartnerTokenConsumed = { model.partnerTokenConsumed() },
+                            onPartnerSignedIn = { model.onPartnerSignedIn() },
+                            analytics = model.analytics,
+                            publicOrigin = linkPublicOrigin,
                         )
                     }
                 }
@@ -487,6 +624,17 @@ private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaun
     // Screens swap in and out of this one slot; the holder keeps each one's remembered state (the half-typed
     // delete confirmation in Settings) while another screen is on top.
     val holder = rememberSaveableStateHolder()
+    val ready = model.state is AccountState.Ready
+    LaunchedEffect(model.destination, ready) {
+        if (!ready) return@LaunchedEffect
+        when (model.destination ?: return@LaunchedEffect) {
+            AccountDestination.GIFTS -> inHistory = dashboard != null
+            AccountDestination.PAYMENT_METHOD -> inGift = giving != null
+            AccountDestination.PROFILE -> inSettings = service != null
+            AccountDestination.DASHBOARD -> Unit
+        }
+        model.destinationOpened()
+    }
     if (inGift && giving != null) {
         BackHandler { inGift = false }
         holder.SaveableStateProvider("gift") {
@@ -508,9 +656,10 @@ private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaun
             EngagementHome(
                 viewModel(key = "engagement-${model.generation}", factory = EngagementModel.factory(engagementService)),
                 publicOrigin = publicOrigin,
-                sharer = remember { ReferralShareAction(AndroidReferralSharer(context)) },
+                sharer = remember { ReferralShareAction(AndroidReferralSharer(context), model.analytics) },
                 onClose = { inEngagement = false },
                 onSignedOut = { inEngagement = false; model.onSignedOut() },
+                wallet = model.wallet?.let { viewModel<WalletPassModel>(key = "wallet-${model.generation}", factory = WalletPassModel.factory(it)) },
             )
         }
     } else if (inEvents && eventsService != null) {
@@ -542,6 +691,9 @@ private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaun
                     viewModel<PasswordChangeModel>(key = "password-${model.generation}", factory = PasswordChangeModel.factory(passwordService))
                 },
                 onCancelGift = if (giving != null) ({ inGift = true }) else null,
+                management = model.management,
+                generation = model.generation,
+                analytics = model.analytics,
             )
         }
     } else {
@@ -607,7 +759,8 @@ private fun DonorLanding(model: AccountModel, onSettings: (() -> Unit)? = null, 
 @Composable
 private fun SettingsHome(
     model: SettingsModel, onBack: (() -> Unit)? = null, onSignedOut: (() -> Unit)? = null, password: PasswordChangeModel? = null,
-    onCancelGift: (() -> Unit)? = null,
+    onCancelGift: (() -> Unit)? = null, management: AccountManagementService? = null, generation: Int = 0,
+    analytics: AnalyticsUploader? = null,
 ) {
     LaunchedEffect(Unit) { model.load() }
     LaunchedEffect(model.signedOut) { if (model.signedOut) onSignedOut?.invoke() }
@@ -640,7 +793,8 @@ private fun SettingsHome(
             is SettingsPhase.Ready -> model.snapshot?.let { snapshot ->
                 SettingsContent(model, snapshot, confirmingDelete, deleteTyped,
                     onConfirmingChange = { confirmingDelete = it }, onTypedChange = { deleteTyped = it }, password = password,
-                    onCancelGift = onCancelGift)
+                    onCancelGift = onCancelGift, management = management, generation = generation, onSignedOut = onSignedOut,
+                    analytics = analytics)
             }
         }
         model.actionError?.let { Text(it, modifier = Modifier.testTag("settings-action-error")) }
@@ -651,12 +805,17 @@ private fun SettingsHome(
 private fun SettingsContent(
     model: SettingsModel, snapshot: SettingsSnapshot, confirmingDelete: Boolean, deleteTyped: String,
     onConfirmingChange: (Boolean) -> Unit, onTypedChange: (String) -> Unit, password: PasswordChangeModel? = null,
-    onCancelGift: (() -> Unit)? = null,
+    onCancelGift: (() -> Unit)? = null, management: AccountManagementService? = null, generation: Int = 0, onSignedOut: (() -> Unit)? = null,
+    analytics: AnalyticsUploader? = null,
 ) {
     // Profile header — role is immutable (D-1), ZIP drives streak day rollover.
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(snapshot.profile.email, style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("settings-email"))
-        Text("ZIP: ${snapshot.profile.zipLabel}", style = MaterialTheme.typography.bodySmall)
+        if (management == null) Text("ZIP: ${snapshot.profile.zipLabel}", style = MaterialTheme.typography.bodySmall)
+    }
+    if (management != null) {
+        EmailChangeSection(viewModel(key = "email-change-$generation", factory = EmailChangeModel.factory(snapshot.profile.email, management)))
+        ProfileDetailsSection(viewModel(key = "details-$generation", factory = ProfileDetailsModel.factory(snapshot.profile, management)))
     }
 
     // Notification toggles (§6.11) — email then push categories. Payment-failure email is absent
@@ -676,9 +835,19 @@ private fun SettingsContent(
         ToggleRow("Volunteer opt-in", snapshot.preferences.volunteer, "volunteer-toggle") {
             model.toggle("volunteer", it)
         }
+        if (analytics != null) {
+            ToggleRow("Usage analytics", analytics.choice == true, "analytics-toggle") { analytics.choose(it) }
+            Text("First-party only: a temporary journey ID measures signup, sharing and giving. No names, email addresses or " +
+                "payment details are sent.", style = MaterialTheme.typography.bodySmall)
+        }
     }
 
     password?.let { PasswordSection(it) }
+
+    if (management != null) {
+        EmployerSection(viewModel(key = "employer-$generation", factory = EmployerModel.factory(management)))
+        SessionsSection(viewModel(key = "sessions-$generation", factory = DeviceSessionsModel.factory(management))) { onSignedOut?.invoke() }
+    }
 
     // Sign out.
     Button(onClick = { model.signOut() }, modifier = Modifier.testTag("settings-signout")) { Text("Sign out") }
@@ -730,130 +899,3 @@ private fun ToggleRow(label: String, value: Boolean, tag: String, onChange: (Boo
 }
 
 
-// Partner portal (PRD P-*, EM-*, §7). The pending-approval gate shows nothing else (P-2); the
-// loaded portal renders verified-or-hidden Overview tiles (§7.3), spend totals, the Our People
-// rollup with <5 suppression (EM-3), and admin-gated user management (§7.2) — all inline.
-@Composable
-private fun PartnerPortal(model: PartnerModel) {
-    LaunchedEffect(Unit) { model.load() }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .safeDrawingPadding()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp)
-            .testTag("partner-portal"),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text("Partner portal", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
-        when (val phase = model.phase) {
-            is PartnerPhase.Loading ->
-                CircularProgressIndicator(modifier = Modifier.testTag("partner-loading"))
-            is PartnerPhase.Pending ->
-                // P-2: pending approval shows nothing else.
-                Column(modifier = Modifier.testTag("partner-pending"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Awaiting approval", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
-                    Text("Your organization’s account is pending review. We’ll email you when it’s approved.")
-                }
-            is PartnerPhase.Failed ->
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(phase.message, modifier = Modifier.testTag("partner-error"))
-                    DadPrimaryButton("Try again") { model.load() }
-                }
-            is PartnerPhase.Ready -> model.snapshot?.let { PartnerContent(model, it) }
-        }
-        model.actionError?.let { Text(it, modifier = Modifier.testTag("partner-action-error")) }
-    }
-}
-
-@Composable
-private fun PartnerContent(model: PartnerModel, snapshot: PartnerSnapshot) {
-    val overview = snapshot.overview
-    // Overview tiles — a figure renders ONLY when verified (§7.3); unverified is omitted.
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(overview.organization, style = MaterialTheme.typography.titleMedium)
-        overview.verifiedLine?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("partner-verified-line"))
-        }
-        overview.committed.label?.let {
-            Text("Committed: $it", modifier = Modifier.testTag("partner-committed"))
-        }
-        // deployed is unverified in the preview -> intentionally absent (never estimated)
-        overview.peopleReached.label?.let {
-            Text("People reached: $it", modifier = Modifier.testTag("partner-reached"))
-        }
-        overview.enrolledLabel?.let {
-            Text("Enrolled: $it", modifier = Modifier.testTag("partner-enrolled"))
-        }
-    }
-
-    // Our People rollup — figures or the suppression notice (EM-3).
-    snapshot.people?.let { people ->
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Our people", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
-            val notice = people.suppressionNotice
-            if (notice != null) {
-                Text(notice, modifier = Modifier.testTag("partner-suppressed"))
-            } else {
-                people.givenLabel?.let { Text("Given: $it", modifier = Modifier.testTag("partner-given")) }
-            }
-        }
-    }
-
-    // Spend totals (P-12).
-    if (snapshot.spend.isNotEmpty()) {
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("Spend", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
-            snapshot.spend.forEach { Text("${it.category}: ${it.amountLabel}", style = MaterialTheme.typography.bodySmall) }
-        }
-    }
-
-    // Users — admin can invite/remove inline; a viewer sees the list read-only (§7.2).
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("Team", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
-        var confirmingRemoval by rememberSaveable { mutableStateOf<String?>(null) }
-        snapshot.users.forEach { user ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val isSelf = user.id == snapshot.selfId
-                Text("${user.name}${if (isSelf) " (you)" else ""} · ${user.role}", modifier = Modifier.weight(1f))
-                if (model.canRemove(user)) {
-                    if (confirmingRemoval == user.id) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = { model.removeUser(user.id); confirmingRemoval = null },
-                                modifier = Modifier.testTag("partner-remove-confirm-${user.id}")
-                                    .semantics { contentDescription = "Confirm remove ${user.name}" },
-                            ) { Text("Yes, remove") }
-                            Button(
-                                onClick = { confirmingRemoval = null },
-                                modifier = Modifier.testTag("partner-remove-keep-${user.id}"),
-                            ) { Text("Keep") }
-                        }
-                    } else {
-                        Button(
-                            onClick = { confirmingRemoval = user.id },
-                            modifier = Modifier.testTag("partner-remove-${user.id}")
-                                .semantics { contentDescription = "Remove ${user.name}" },
-                        ) { Text("Remove") }
-                    }
-                }
-            }
-        }
-        if (model.role.canManageUsers) {
-            var inviteEmail by rememberSaveable { mutableStateOf("") }
-            OutlinedTextField(
-                value = inviteEmail, onValueChange = { inviteEmail = it },
-                label = { Text("Invite a viewer by email") }, singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                modifier = Modifier.fillMaxWidth().testTag("partner-invite-email"),
-            )
-            Button(
-                onClick = { model.inviteUser(inviteEmail.trim(), PartnerRole.VIEWER); inviteEmail = "" },
-                enabled = isPlausibleEmail(inviteEmail),
-                modifier = Modifier.testTag("partner-invite"),
-            ) { Text("Invite user") }
-        } else {
-            Text("Read-only access", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("partner-readonly"))
-        }
-    }
-}

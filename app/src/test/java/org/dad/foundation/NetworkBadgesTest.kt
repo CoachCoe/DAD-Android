@@ -36,6 +36,19 @@ class NetworkBadgesTest {
         assertTrue(b.perkActive)
     }
 
+    @Test fun earnedCityBadgeShowsItsDisplayTitleInTheLabel() {
+        val b = Badge("CITY50", "Top 50 City", "r", "", earned = true, earnedAt = null, city = "Chicago", displayTitle = "Top 50 in Chicago")
+        assertEquals("Top 50 in Chicago", b.shownTitle)
+        assertEquals("Top 50 in Chicago, earned", b.accessibilityLabel)
+        assertEquals("Top 50 City", b.copy(displayTitle = "").shownTitle)
+    }
+
+    @Test fun lockedCityBadgeKeepsTheGenericTitle() {
+        val b = Badge("CITY50", "Top 50 City", "Reach the top 50", "", earned = false, earnedAt = null, city = "Chicago", displayTitle = "Top 50 in Chicago")
+        assertEquals("Top 50 City", b.shownTitle)
+        assertEquals("Top 50 City, locked. Reach the top 50", b.accessibilityLabel)
+    }
+
     @Test fun lockedBadgeShowsRuleTextAndNoActivePerk() {
         val b = Badge(
             code = "LEGACY", title = "Legacy",

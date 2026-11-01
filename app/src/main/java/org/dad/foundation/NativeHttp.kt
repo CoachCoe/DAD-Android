@@ -25,17 +25,18 @@ internal fun defaultNativeClient(): OkHttpClient = OkHttpClient.Builder()
     .callTimeout(30, TimeUnit.SECONDS).followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
     .cookieJar(CookieJar.NO_COOKIES).build()
 
-/** A Retrofit bound to [url] that sends the native headers, plus a bearer when [access] is given. */
-internal fun nativeRetrofit(url: HttpUrl, baseClient: OkHttpClient, access: String? = null): Retrofit {
+/** A Retrofit bound to [url] that sends the native headers, plus a bearer when [access] is given. Bodies over
+ *  [maxBodyBytes] are an invalid response. */
+internal fun nativeRetrofit(url: HttpUrl, baseClient: OkHttpClient, access: String? = null, maxBodyBytes: Long = 1_048_576): Retrofit {
     val builder = baseClient.newBuilder().followRedirects(false).followSslRedirects(false).cookieJar(CookieJar.NO_COOKIES)
     builder.interceptors().add(0, Interceptor { chain ->
-        val request = chain.request().newBuilder().header("X-DAD-Client", "native").removeHeader("Origin").removeHeader("Cookie")
+        val request = chain.request().newBuilder().header("X-DAD-Client", "native").header("X-DAD-Platform", "ANDROID").removeHeader("Origin").removeHeader("Cookie")
         if (access != null) request.header("Authorization", "Bearer $access") else request.removeHeader("Authorization")
         val response = chain.proceed(request.build())
         val body = response.body
-        if (body.contentLength() > 1_048_576) { response.close(); throw AccountFailure.InvalidResponse }
+        if (body.contentLength() > maxBodyBytes) { response.close(); throw AccountFailure.InvalidResponse }
         val source = body.source()
-        if (source.request(1_048_577)) { response.close(); throw AccountFailure.InvalidResponse }
+        if (source.request(maxBodyBytes + 1)) { response.close(); throw AccountFailure.InvalidResponse }
         val bytes = source.readByteArray()
         response.close()
         response.newBuilder().body(bytes.toResponseBody(body.contentType())).build()

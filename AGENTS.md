@@ -22,6 +22,12 @@ CI runs the same on API 35 and **lint treats warnings as errors**.
 - Work on `dev`; ship via `dev` → PR → `main`. Never push to `main` directly.
 - Run `git commit` and `git push` as two separate commands.
 
+## Code comments
+
+- Comments explain **why** (a constraint, a trade-off, a non-obvious behavior), not what the
+  code already says.
+- No commented-out code (git keeps history). A `TODO` names a tracked issue.
+
 ## Gotchas not written in the docs
 
 - **`git add -A` silently stages planning docs.** `docs/requirements/` (dev plan, gap
@@ -34,7 +40,7 @@ CI runs the same on API 35 and **lint treats warnings as errors**.
   triple, copy the files, widen the OpenAPI Generator allow-list for new ops, regenerate,
   run check-foundation + build. Never generate a client from a moving branch.
 - **Re-vendor also touches the test pin:** `scripts/check-foundation.test.mjs` hardcodes the
-  expected version (currently 2.7.0); bump it with `foundation.lock.json`.
+  expected version (currently 2.10.1); bump it with `foundation.lock.json`.
 - **Analytics payloads must match DAD-Main's ingest allow-list** (`internal/analytics`):
   string-to-string properties, extra keys are rejected. Pinned per event in `AttributionTest`.
 - **Generator constraints:** `anyOf` + `type: null` and `additionalProperties: false`

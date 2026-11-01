@@ -112,6 +112,7 @@ class WireEngagement(private val product: ProductClient) : EngagementService {
                         code = badge.str("code"), title = badge.str("title"), rule = badge.optStr("rule").orEmpty(),
                         perk = Badge.perkCopy(badge.optStr("perk").orEmpty()),
                         earned = badge.bool("earned"), earnedAt = badge.optTime("earned_at"),
+                        city = badge.optStr("city"), displayTitle = badge.optStr("display_title").orEmpty(),
                     )
                 },
         )
@@ -158,10 +159,8 @@ class WireEngagement(private val product: ProductClient) : EngagementService {
         val name = sharing.optStr("public_name")
         val link = sharing.optStr("link")
         if (name.isNullOrBlank() || link == null) return InviteOutcome.NeedsName
-        // The code is the last segment of `<origin>/r/<code>`; the shareable link is rebuilt from the configured public origin.
-        val segments = try { URI(link).path.orEmpty().split('/') } catch (_: java.net.URISyntaxException) { return InviteOutcome.Unusable }
-        if (segments.size != 3 || segments[0] != "" || segments[1] != "r") return InviteOutcome.Unusable
-        val code = Attribution.sanitized(segments[2]) ?: return InviteOutcome.Unusable
+        // The code is the contract's `referral_code` (null exactly when the links are); the shareable link is rebuilt from the configured public origin.
+        val code = Attribution.sanitized(sharing.optStr("referral_code") ?: return InviteOutcome.Unusable) ?: return InviteOutcome.Unusable
         return InviteOutcome.Code(code)
     }
 

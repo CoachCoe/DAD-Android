@@ -305,7 +305,7 @@ private fun ReportIssue(url: String) {
     }
 }
 
-private fun fileAuthority(context: Context) = "${context.packageName}.files"
+internal fun fileAuthority(context: Context) = "${context.packageName}.files"
 
-private fun sharedFile(context: Context, folder: String, name: String): File =
+internal fun sharedFile(context: Context, folder: String, name: String): File =
     File(File(context.cacheDir, "shared/$folder").apply { mkdirs() }, name)

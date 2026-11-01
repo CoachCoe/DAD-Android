@@ -63,7 +63,7 @@ class WireSettings(private val product: ProductClient, private val onLocalWipe: 
     }
 
     private fun snapshot(p: Profile): SettingsSnapshot = SettingsSnapshot(
-        profile = ProfileSummary(email = p.email.orInvalid(), accountRole = p.accountRole.orInvalid().value, zip = p.zip.orNullIfBlank(), city = p.city.orNullIfBlank(), phone = p.phone.orNullIfBlank()),
+        profile = p.summary(),
         preferences = Preferences(
             version = p.version, referralEmails = p.referralEmails, marketingEmails = p.marketingEmails,
             pushReferralConverted = p.pushReferralConverted, pushStreakAtRisk = p.pushStreakAtRisk,
@@ -72,9 +72,12 @@ class WireSettings(private val product: ProductClient, private val onLocalWipe: 
             pushEventReminder = p.pushEventReminder, pushEventPromoted = p.pushEventPromoted,
             pushGiftProcessed = p.pushGiftProcessed, rankingsOptedOut = p.rankingsOptedOut,
             networkVisible = p.networkVisible, volunteer = p.volunteer))
-
-    // Gson leaves absent fields null despite the generated non-null types; treat that as a bad response.
-    private fun <T> T?.orInvalid(): T = this ?: throw AccountFailure.InvalidResponse
-
-    private fun String?.orNullIfBlank(): String? = if (isNullOrBlank()) null else this
 }
+
+internal fun Profile.summary() = ProfileSummary(
+    email = email.orInvalid(), accountRole = accountRole.orInvalid().value, zip = zip.orNullIfBlank(), city = city.orNullIfBlank(), phone = phone.orNullIfBlank())
+
+// Gson leaves absent fields null despite the generated non-null types; treat that as a bad response.
+private fun <T> T?.orInvalid(): T = this ?: throw AccountFailure.InvalidResponse
+
+private fun String?.orNullIfBlank(): String? = if (isNullOrBlank()) null else this

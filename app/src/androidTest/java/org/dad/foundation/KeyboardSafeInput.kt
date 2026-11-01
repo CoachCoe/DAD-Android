@@ -62,8 +62,14 @@ fun ComposeTestRule.awaitKeyboardSettled() {
         }
     }
     InstrumentationRegistry.getInstrumentation().runOnMainSync { Choreographer.getInstance().postFrameCallback(onFrame) }
-    waitUntil(SETTLE_TIMEOUT_MS) { settled.get() }
-    waitForIdle()
+    try {
+        waitUntil(SETTLE_TIMEOUT_MS) { settled.get() }
+        waitForIdle()
+    } finally {
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            Choreographer.getInstance().removeFrameCallback(onFrame)
+        }
+    }
 }
 
 /** Fails if the node's bottom edge sits under the soft keyboard (a click there is silently dropped). */
@@ -96,6 +102,10 @@ fun ComposeTestRule.tapNode(node: SemanticsNodeInteraction, description: String)
 fun ComposeTestRule.enterText(tag: String, text: String, replace: Boolean = false, timeoutMs: Long = 15_000) {
     waitUntil(timeoutMs) { exists(tag) }
     val field = onNodeWithTag(tag).performScrollTo()
+    // A semantics-only insertion can request the IME before Android has served the editor.
+    // Focus it through the same touch path as a user, then wait for the input connection and layout.
+    tapNode(field, tag)
+    awaitKeyboardSettled()
     if (replace) field.performTextReplacement(text) else field.performTextInput(text)
     awaitKeyboardSettled()
 }
