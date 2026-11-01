@@ -52,6 +52,8 @@ jobs:
           done
           if [ "$READY" != true ]; then cat "$RUNNER_TEMP/emulator.log"; exit 1; fi
           adb shell input keyevent 82
+          # The journeys deliberately exercise controls above the software keyboard.
+          adb shell settings put secure show_ime_with_hard_keyboard 1
           for scale in window_animation_scale transition_animation_scale animator_duration_scale; do adb shell settings put global "$scale" 0; done
           ./gradlew :app:connectedDebugAndroidTest
       - name: Name failing instrumentation tests

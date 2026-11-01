@@ -62,8 +62,14 @@ fun ComposeTestRule.awaitKeyboardSettled() {
         }
     }
     InstrumentationRegistry.getInstrumentation().runOnMainSync { Choreographer.getInstance().postFrameCallback(onFrame) }
-    waitUntil(SETTLE_TIMEOUT_MS) { settled.get() }
-    waitForIdle()
+    try {
+        waitUntil(SETTLE_TIMEOUT_MS) { settled.get() }
+        waitForIdle()
+    } finally {
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            Choreographer.getInstance().removeFrameCallback(onFrame)
+        }
+    }
 }
 
 /** Fails if the node's bottom edge sits under the soft keyboard (a click there is silently dropped). */

@@ -49,7 +49,10 @@ Open this folder in Android Studio and run the app on Android 8/API 26 or newer.
 By default a debug build uses a labeled synthetic account through the session API (`preview_signed_out` starts it signed out; code 123456 signs in). The `stub_backend` extra runs the REAL sign-in, session, settings and donor-home code on a scripted in-process transport (debug source set only) for the instrumentation tests; `stub_signed_in` starts with a stored session, and `stub_dashboard_empty` / `stub_dashboard_fail_first` / `stub_dashboard_unranked` pick the donor-home scenario. Android
 instrumentation tests cover the Compose journeys and actual Keystore storage:
 `./gradlew :app:connectedDebugAndroidTest` with a running emulator. CI runs the same
-checks on API 35, and lint treats warnings as errors. AGP 9.4 itself emits Gradle
+checks on API 35, and lint treats warnings as errors. Emulator journeys require the software
+keyboard even when a hardware keyboard is connected: enable "Use on-screen keyboard" in the
+emulator settings, or run `adb shell settings put secure show_ime_with_hard_keyboard 1`.
+The tests wait for that keyboard and check that tapped controls are not covered by it. AGP 9.4 itself emits Gradle
 configuration deprecation diagnostics; those upstream warnings are not suppressed.
 
 ## Contract, sessions, and transport
