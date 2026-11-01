@@ -68,7 +68,7 @@ class EngagementWiredFlowTest {
             compose.onNodeWithTag("badge-invite-access").performScrollTo().assertIsDisplayed()
             // Earned Founding Donor carries its perk as copy (the server sends a key); locked Team Captain shows its rule.
             compose.onNodeWithTag("badge-earned-F").performScrollTo().assertIsDisplayed()
-            textOf("badge-perk-F", "Invite-only founding events")
+            textOf("badge-earned-F", "Invite-only founding events")
             compose.onNodeWithTag("badge-locked-TC").performScrollTo().assertIsDisplayed()
             textOf("badge-locked-TC", "20 converted referrals")
             textOf("badge-locked-TC", "Locked")

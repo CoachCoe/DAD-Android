@@ -154,11 +154,11 @@ class NetworkBadgesTest {
         val on = SharingState(
             publicName = "Alex C.",
             link = "https://dad.org/r/alex",
-            irlLink = "https://dad.org/r/alex/irl",
+            irlLink = "https://dad.org/r/alex?via=irl",
         )
         assertTrue(on.isPublic)
         assertEquals("https://dad.org/r/alex", on.shareLink)
-        assertEquals("https://dad.org/r/alex/irl", on.inPersonLink)
+        assertEquals("https://dad.org/r/alex?via=irl", on.inPersonLink)
         assertEquals("Shown as Alex C.", on.visibilityLabel)
     }
 

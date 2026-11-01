@@ -174,7 +174,7 @@ private fun BadgeTile(badge: Badge, modifier: Modifier = Modifier) {
         Text(badge.title, style = MaterialTheme.typography.labelLarge, color = color)
         Text(if (badge.earned) badge.earnedAt?.let { "Earned ${it.format(shortDate)}" } ?: "Earned" else "Locked", style = MaterialTheme.typography.labelSmall, color = color)
         if (!badge.earned) Text(badge.rule, style = MaterialTheme.typography.bodySmall)
-        if (badge.perkActive) Text("Perk: ${badge.perk}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("badge-perk-${badge.code}"))
+        if (badge.perkActive) Text("Perk: ${badge.perk}", style = MaterialTheme.typography.bodySmall)
     }
 }
 

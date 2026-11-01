@@ -29,8 +29,7 @@ referrals or total given) are shown as unknown, never as zero. A failed refresh 
 notice; a 401 refreshes once and then signs out; an undocumented 429 is "too many requests", any other
 undocumented status is "unavailable". These five GETs are decoded from raw JSON in `WireDashboard` with strict
 null handling, because the generated Kotlin models flatten the dashboard's `oneOf` and turn nullable members
-into non-null types that Gson would silently fill with zeros. Not wired yet: `saveProfile`, the A-3 spend
-drill-in, receipt PDF/share. The other product screens (giving, events, network/badges, partner) remain DEBUG previews.
+into non-null types that Gson would silently fill with zeros. Not wired yet: `saveProfile`, receipt PDF/share. Engagement (see below) is wired; the partner portal remains a DEBUG preview.
 
 Account deletion calls `POST /donor/me/delete` first and wipes local state (Keystore credentials and
 attribution) only on success; a 409 (active monthly gift or open checkout) is explained and nothing is
@@ -197,3 +196,27 @@ once; other codes show a hint and scanning continues. Denied or unavailable came
 which is always on screen. Live capture is device-only; tests use a fake scanner source. "Add to calendar" shares the `.ics`
 through a FileProvider URI and the share sheet (no calendar permission). The contract defines no Idempotency-Key
 for these commands. Debug stub extras: `stub_events_invited`, `stub_events_fail_first`, `stub_events_not_eligible`.
+
+## Engagement (wiring phase 5, contract 2.7.0)
+
+Real `WireEngagement` behind `EngagementService`, opened from the donor home ("See your impact"): lifetime impact
+and rank from `dashboard`, the badge grid (`donorBadges`; earned / locked and the perk are stated in text, perk
+gating follows the server codes F / 1K / TC, perk keys map to copy), the referral network (`donorNetwork`),
+the invite (`sharing` + `conversions`) and the rankings choice (`profile` + `savePreferences`, explicit
+`rankings_opted_out`: read the profile, save the whole block with its version, one re-read on a 409; the card flips
+at once and reverts with an inline notice if the save fails). Today's initiative card opens the spend drill-in
+(`initiativeSpend`, A-3, totals by category only).
+
+- **Unknown is not zero.** Each section the server did not give shows "can't be shown right now" (or "—"); an
+  unreadable section never becomes an empty grid, a zero or "not ranked". Sections are read concurrently and kept
+  independently.
+- **Rank label.** `national_percentile` is the top bucket as sent (2 reads "Top 2% nationally"), clamped to 1..100.
+- **Invite links** are `<DAD_PUBLIC_ORIGIN>/r/<code>`; the in-person variant (and the QR, drawn locally from ZXing's
+  matrix) is `/r/<code>?via=irl`. The code is parsed from the `sharing` link path (1-64 of `[A-Za-z0-9_-]`); the link is
+  rebuilt from the configured origin, never taken from the server, and with no configured origin there is no link.
+  A donor with no public name is prompted to choose one (`saveSharing`).
+- **Raw JSON.** The engagement routes are decoded from raw JSON so `Conversion.kind` (an open string) and nullable
+  members cannot be coerced by Gson. Statuses map as in `WireStatus.kt`.
+- **Test stub.** `stub_backend` + `stub_signed_in` serves badges, network, sharing, conversions and a spend
+  (`stub_open_engagement`, `stub_no_public_name`, `stub_rankings_fail_toggle`, `stub_badges_down`,
+  `stub_network_down`, `stub_spend_unpublished`). `preview_impact` still shows the in-memory preview.
