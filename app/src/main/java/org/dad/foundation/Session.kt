@@ -72,6 +72,7 @@ class AccountSession(private val api: AccountAPI, private val store: CredentialS
         val result = produce()
         mutex.withLock {
             if (epoch != before) throw AccountFailure.SignedOut
+            currentCoroutineContext().ensureActive()
             store.save(result)
             credentials = result
             epoch++

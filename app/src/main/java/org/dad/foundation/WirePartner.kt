@@ -1,5 +1,7 @@
 package org.dad.foundation
 
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import okhttp3.HttpUrl
@@ -29,6 +31,7 @@ import java.util.Date
  */
 class PartnerSession(private val store: CredentialStore, private val now: () -> Long = System::currentTimeMillis) {
     private var stored: Credentials? = store.load()
+    private var epoch = 0L
 
     @get:Synchronized val isSignedIn: Boolean get() = runCatching { token() }.isSuccess
 
@@ -36,6 +39,7 @@ class PartnerSession(private val store: CredentialStore, private val now: () -> 
         val credentials = Credentials(token, refresh = "", expiresAtMillis = now() + LIFETIME_MILLIS)
         store.save(credentials)
         stored = credentials
+        epoch++
     }
 
     /** The bearer, or [AccountFailure.SignedOut] once it has expired (which also forgets it). */
@@ -45,7 +49,39 @@ class PartnerSession(private val store: CredentialStore, private val now: () -> 
         return current.access
     }
 
+    suspend fun establish(produce: suspend () -> String) {
+        val before = synchronized(this) { epoch }
+        val bearer = produce()
+        val context = currentCoroutineContext()
+        synchronized(this) {
+            if (before != epoch) throw AccountFailure.SignedOut
+            context.ensureActive()
+            install(bearer)
+        }
+    }
+
+    suspend fun <T> authorized(call: suspend (String) -> T): T {
+        currentCoroutineContext().ensureActive()
+        val (bearer, before) = synchronized(this) { token() to epoch }
+        try {
+            val result = call(bearer)
+            synchronized(this) { if (before != epoch) throw AccountFailure.SignedOut }
+            currentCoroutineContext().ensureActive()
+            return result
+        } catch (ended: AccountFailure.SignedOut) {
+            synchronized(this) { if (before == epoch) clear() }
+            throw ended
+        }
+    }
+
+    @Synchronized fun end(): String? {
+        val bearer = runCatching { token() }.getOrNull()
+        clear()
+        return bearer
+    }
+
     @Synchronized fun clear() {
+        epoch++
         stored = null
         store.clear()
     }
@@ -68,11 +104,13 @@ class WirePartnerAuth(
 
     /** A used or expired link is [AccountFailure.InvalidInput]; a partner who may not sign in is [AccountFailure.Forbidden]. */
     override suspend fun accept(token: String) {
-        val response = decoding { api().partnerAcceptInvite(PartnerAcceptInviteRequest(token)) }
-        if (response.code() == 403) { response.errorBody()?.close(); throw AccountFailure.Forbidden }
-        val bearer = response.requireBody().session
-        if (bearer.isNullOrBlank()) throw AccountFailure.InvalidResponse
-        session.install(bearer)
+        session.establish {
+            val response = decoding { api().partnerAcceptInvite(PartnerAcceptInviteRequest(token)) }
+            if (response.code() == 403) { response.errorBody()?.close(); throw AccountFailure.Forbidden }
+            val bearer = response.requireBody().session
+            if (bearer.isNullOrBlank()) throw AccountFailure.InvalidResponse
+            bearer
+        }
     }
 }
 
@@ -107,9 +145,10 @@ class WirePartner(
     private val url: HttpUrl = validatedOrigin(origin)
 
     private suspend fun <T> perform(maxBodyBytes: Long = 1_048_576, operation: suspend (Retrofit) -> T): T {
-        val retrofit = nativeRetrofit(url, baseClient, session.token(), maxBodyBytes)
-        return try { decoding { operation(retrofit) } }
-        catch (ended: AccountFailure.SignedOut) { session.clear(); throw ended }
+        return session.authorized { bearer ->
+            val retrofit = nativeRetrofit(url, baseClient, bearer, maxBodyBytes)
+            decoding { operation(retrofit) }
+        }
     }
 
     private fun <T> Response<T>.partnerBody(): T {
@@ -214,8 +253,7 @@ class WirePartner(
     /** The local session is forgotten first, so the partner is signed out on this device even when the server
      *  cannot be reached; the server session then simply expires. */
     override suspend fun signOut() {
-        val bearer = runCatching { session.token() }.getOrNull()
-        session.clear()
+        val bearer = session.end()
         if (bearer == null) return
         runCatching { decoding { nativeRetrofit(url, baseClient, bearer).create(PartnerReads::class.java).signOut(JsonObject()).body() } }
     }

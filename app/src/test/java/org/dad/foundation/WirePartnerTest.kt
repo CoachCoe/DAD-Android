@@ -1,6 +1,12 @@
 package org.dad.foundation
 
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.test.runCurrent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -13,6 +19,47 @@ class WirePartnerTest {
         override fun load() = value
         override fun save(value: Credentials) { this.value = value }
         override fun clear() { value = null }
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test fun partnerRequestsCannotOutliveTheirSession() = runTest {
+        for (rejected in listOf(false, true)) {
+            val store = MemoryStore()
+            val session = PartnerSession(store).also { it.install("old") }
+            val gate = CompletableDeferred<Unit>()
+            val request = async { runCatching { session.authorized {
+                gate.await()
+                if (rejected) throw AccountFailure.SignedOut
+                "old private data"
+            } } }
+            runCurrent()
+            session.install("new")
+            gate.complete(Unit)
+            assertEquals(AccountFailure.SignedOut, request.await().exceptionOrNull())
+            assertEquals("new", session.token())
+        }
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test fun partnerSignInCannotRestoreASignedOutSession() = runTest {
+        val store = MemoryStore()
+        val session = PartnerSession(store)
+        val gate = CompletableDeferred<String>()
+        val request = async { runCatching { session.establish { gate.await() } } }
+        runCurrent()
+        session.clear()
+        gate.complete("late")
+        assertEquals(AccountFailure.SignedOut, request.await().exceptionOrNull())
+        assertNull(store.value)
+    }
+
+    @Test fun cancelledPartnerSignInInstallsNothing() = runTest {
+        val store = MemoryStore()
+        val session = PartnerSession(store)
+        val request = launch { session.establish { currentCoroutineContext().cancel(); "late" } }
+        request.join()
+        assertTrue(request.isCancelled)
+        assertNull(store.value)
     }
 
     private val overviewJson = """{"user_id":"u1","organization":"Acme","description":"","role":"ADMIN","company_code":"ACME",""" +
