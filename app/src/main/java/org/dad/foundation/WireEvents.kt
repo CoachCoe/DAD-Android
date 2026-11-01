@@ -92,7 +92,7 @@ class WireEvents(private val product: ProductClient) : EventsService {
         requireId(eventId)
         return product.perform { retrofit ->
             val response = retrofit.create(EventsApi::class.java).calendar(eventId)
-            if (!response.isSuccessful) { response.errorBody()?.close(); throw failureFor(response.code()) }
+            if (!response.isSuccessful) { response.errorBody()?.close(); throw failureForStatus(response.code()) }
             val bytes = response.body()?.use { it.source().let { source -> if (source.request(CALENDAR_BYTE_LIMIT + 1L)) null else source.readByteArray() } }
             // A body over the cap, or one that is not an iCalendar file, is not an event file.
             if (bytes == null || bytes.isEmpty() || !String(bytes, Charsets.UTF_8).trimStart().startsWith("BEGIN:VCALENDAR")) throw AccountFailure.InvalidResponse
@@ -107,24 +107,10 @@ class WireEvents(private val product: ProductClient) : EventsService {
         if (id.length != 36 || runCatching { UUID.fromString(id) }.isFailure) throw AccountFailure.InvalidInput
     }
 
-    private fun Response<JsonElement>.eventBody(): JsonElement {
-        if (isSuccessful) return body() ?: throw AccountFailure.InvalidResponse
-        errorBody()?.close()
-        throw failureFor(code())
-    }
+    private fun Response<JsonElement>.eventBody(): JsonElement = successBody()
 
     private fun Response<JsonElement>.eventsBody(): List<DonorEvent> =
         eventBody().asObjectOrInvalid().array("events").map { mapEvent(it.asObjectOrInvalid()) }
-
-    private fun failureFor(code: Int): AccountFailure = when (code) {
-        401 -> AccountFailure.SignedOut
-        403 -> AccountFailure.Forbidden
-        404 -> AccountFailure.NotFound
-        409 -> AccountFailure.Conflict
-        422 -> AccountFailure.InvalidInput
-        429 -> AccountFailure.RateLimited
-        else -> AccountFailure.Unavailable
-    }
 
     internal companion object {
         /** Defensive caps: a longer list is truncated rather than trusted; a larger calendar file is refused. */

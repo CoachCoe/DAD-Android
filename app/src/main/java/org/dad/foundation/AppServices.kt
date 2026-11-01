@@ -33,6 +33,7 @@ class AppServices(
     val dashboard: DashboardService? = null,
     val giving: GivingKit? = null,
     val events: EventsService? = null,
+    val engagement: EngagementService? = null,
 )
 
 /** DEBUG launch switches. Always all-false in a release build. */
@@ -51,6 +52,10 @@ data class LaunchOptions(
     val stubOpenGift: Boolean = false,
     /** Stub backend only: what the scripted events routes answer. */
     val stubEvents: StubEventsScenario = StubEventsScenario.STANDARD,
+    /** Stub backend only: what the scripted engagement routes answer. */
+    val stubEngagement: StubEngagementScenario = StubEngagementScenario.STANDARD,
+    /** Stub backend only (screenshot and UI-test aid): open the engagement screen straight from the donor home. */
+    val stubOpenEngagement: Boolean = false,
 )
 
 /** What the DEBUG stub backend answers for the donor-home reads. */
@@ -61,3 +66,6 @@ enum class StubGift { NONE, ACTIVE, ACTIVE_FAIL_FIRST }
 
 /** What the DEBUG stub backend does for the events routes. */
 enum class StubEventsScenario { STANDARD, INVITED, FAIL_FIRST, NOT_ELIGIBLE }
+
+/** What the DEBUG stub backend does for the engagement routes. */
+enum class StubEngagementScenario { STANDARD, NO_PUBLIC_NAME, TOGGLE_FAIL, BADGES_DOWN, NETWORK_DOWN, SPEND_UNPUBLISHED }

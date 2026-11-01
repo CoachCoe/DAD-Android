@@ -65,6 +65,7 @@ internal fun HomeCard(tag: String, modifier: Modifier = Modifier, content: @Comp
 @Composable
 fun DonorHome(
     model: DashboardModel, giving: GivingModel? = null, onOpenGift: () -> Unit = {}, onOpenEvents: (() -> Unit)? = null,
+    onOpenEngagement: (() -> Unit)? = null, onOpenSpend: ((String, String) -> Unit)? = null,
     onOpenHistory: () -> Unit, onSignedOut: () -> Unit,
 ) {
     LaunchedEffect(Unit) { model.load(); giving?.load() }
@@ -87,7 +88,14 @@ fun DonorHome(
             }
         }
         giving?.let { GiftSummaryCard(it, onManage = onOpenGift) }
-        InitiativeCard(model.initiative, onRetry = { model.load() })
+        InitiativeCard(model.initiative, onRetry = { model.load() }, onSpend = onOpenSpend)
+        if (onOpenEngagement != null) {
+            HomeCard("engagement-card") {
+                Text("Badges, rankings & network", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
+                Text("Your badges, standing, referral network and invite link.", style = MaterialTheme.typography.bodyMedium)
+                OutlinedButton(onClick = onOpenEngagement, modifier = Modifier.heightIn(min = 48.dp).testTag("open-engagement")) { Text("See your impact") }
+            }
+        }
         if (onOpenEvents != null) OutlinedButton(onClick = onOpenEvents, modifier = Modifier.heightIn(min = 48.dp).testTag("open-events")) { Text("Events & volunteering") }
         OutlinedButton(onClick = onOpenHistory, modifier = Modifier.heightIn(min = 48.dp).testTag("open-history")) { Text("Gift history") }
     }
@@ -204,7 +212,7 @@ private fun DashboardCards(dashboard: HomeDashboard) {
 }
 
 @Composable
-private fun InitiativeCard(phase: DashboardModel.InitiativePhase, onRetry: () -> Unit) {
+private fun InitiativeCard(phase: DashboardModel.InitiativePhase, onRetry: () -> Unit, onSpend: ((String, String) -> Unit)? = null) {
     HomeCard("initiative-card") {
         Text("Today your $1 funded", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
         when (phase) {
@@ -227,6 +235,11 @@ private fun InitiativeCard(phase: DashboardModel.InitiativePhase, onRetry: () ->
                     }
                 }
                 Text(HomeInitiative.ATTRIBUTION_NOTE, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("initiative-note"))
+                if (onSpend != null) {
+                    OutlinedButton(onClick = { onSpend(initiative.id, initiative.title) }, modifier = Modifier.heightIn(min = 48.dp).testTag("open-spend")) {
+                        Text("See every dollar this initiative has spent")
+                    }
+                }
             }
         }
     }

@@ -39,7 +39,7 @@ object DebugBackend {
 
     fun stub(context: Context, scope: CoroutineScope, options: LaunchOptions): AppServices? {
         if (!options.stubBackend) return null
-        val interceptor = StubInterceptor(options.stubDeleteBlocked, options.stubDashboard, options.stubGift, options.stubEvents)
+        val interceptor = StubInterceptor(options.stubDeleteBlocked, options.stubDashboard, options.stubGift, options.stubEvents, options.stubEngagement)
         val http = OkHttpClient.Builder().addInterceptor(interceptor).build()
         val store = InMemoryCredentialStore(
             if (options.stubSignedIn) Credentials("stub-access-0", "stub-refresh-0-xxxxxxxxxxxxxxxxxxxxxxxxxxxx", Long.MAX_VALUE) else null,
@@ -57,6 +57,7 @@ object DebugBackend {
             dashboard = WireDashboard(ProductClient(ORIGIN, session, http)),
             giving = GivingKit(WireGiving(ProductClient(ORIGIN, session, http)), stubComplete = interceptor::completeHandoff, pollDelayMs = 200),
             events = WireEvents(ProductClient(ORIGIN, session, http)),
+            engagement = WireEngagement(ProductClient(ORIGIN, session, http)),
         )
     }
 }
@@ -67,10 +68,11 @@ class InMemoryCredentialStore(private var value: Credentials? = null) : Credenti
     @Synchronized override fun clear() { value = null }
 }
 
-private class StubInterceptor(private val deletionBlocked: Boolean, scenario: StubDashboard, gift: StubGift, eventsScenario: StubEventsScenario) : Interceptor {
+private class StubInterceptor(private val deletionBlocked: Boolean, scenario: StubDashboard, gift: StubGift, eventsScenario: StubEventsScenario, engagementScenario: StubEngagementScenario) : Interceptor {
     private val home = StubDonorHome(scenario)
     private val giving = StubGiving(gift)
     private val events = StubEvents(eventsScenario)
+    private val engagement = StubEngagement(engagementScenario)
     private var generation = 0
     private var deleted = false
     private var version = 3
@@ -132,6 +134,7 @@ private class StubInterceptor(private val deletionBlocked: Boolean, scenario: St
             "GET" to "/donor/me/profile" -> if (authorized && !deleted) reply(200, profile()) else reply(401)
             "POST" to "/donor/me/preferences" -> when {
                 !authorized || deleted -> reply(401)
+                engagement.failsPreferenceSave -> reply(503)
                 else -> {
                     prefs.keys.forEach { key ->
                         Regex("\"$key\"\\s*:\\s*(true|false)").find(payload)?.let { prefs[key] = it.groupValues[1] == "true" }
@@ -149,6 +152,9 @@ private class StubInterceptor(private val deletionBlocked: Boolean, scenario: St
             else -> if (request.url.encodedPath.startsWith("/donor/me/recurring") || request.url.encodedPath.startsWith("/donor/me/payment-method")) {
                 if (!authorized || deleted) reply(401)
                 else giving.answer(request.method, request.url.encodedPath, payload, request.header("Idempotency-Key")).let { (code, json) -> reply(code, json) }
+            } else if (engagement.handles(request.url.encodedPath)) {
+                if (!authorized || deleted) reply(401)
+                else engagement.answer(request.method, request.url.encodedPath, payload).let { (code, json) -> reply(code, json) }
             } else if (request.url.encodedPath.startsWith("/donor/me/events")) {
                 if (!authorized || deleted) reply(401)
                 else events.answer(request.method, request.url.encodedPath, payload).let { (code, json) -> reply(code, json) }

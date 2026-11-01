@@ -151,6 +151,8 @@ class AccountModel(
         private set
     var events: EventsService? by mutableStateOf(null)
         private set
+    var engagement: EngagementService? by mutableStateOf(null)
+        private set
     private var loading = false
     private var pendingProof: String? = null
     private var completedProof: String? = null
@@ -171,7 +173,7 @@ class AccountModel(
         try {
             withContext(io) { factory(CoroutineScope(viewModelScope.coroutineContext + io), options) }
                 .also {
-                    services = it; signIn = it.signIn; settings = it.settings; passwordSettings = it.passwordSettings; dashboard = it.dashboard; giving = it.giving; events = it.events
+                    services = it; signIn = it.signIn; settings = it.settings; passwordSettings = it.passwordSettings; dashboard = it.dashboard; giving = it.giving; events = it.events; engagement = it.engagement
                     auth = AuthServices(it.signIn, it.signup, it.passwordSignIn, it.external)
                 }
         } catch (cancelled: CancellationException) { throw cancelled }
@@ -281,8 +283,12 @@ private fun tokenColor(name: String) = Color(DADTokens.color.getValue(name).toCo
 class MainActivity : ComponentActivity() {
     private var incomingLink: String? = null
     private var linkEvent by mutableIntStateOf(0)
+    /** The configured public origin invite links are built from; blank means none (no link is ever invented). */
+    private val linkPublicOrigin by lazy {
+        BuildConfig.DAD_PUBLIC_ORIGIN.ifBlank { if (BuildConfig.DEBUG && intent.getBooleanExtra("stub_backend", false)) DebugBackend.PUBLIC_ORIGIN else "" }
+    }
     private val linkRouter by lazy {
-        val publicOrigin = BuildConfig.DAD_PUBLIC_ORIGIN.ifBlank { if (BuildConfig.DEBUG && intent.getBooleanExtra("stub_backend", false)) DebugBackend.PUBLIC_ORIGIN else "" }
+        val publicOrigin = linkPublicOrigin
         if (publicOrigin.isBlank()) null
         else runCatching { LinkRouter(publicOrigin, assets.open("links.json").bufferedReader().use { it.readText() }) }.getOrNull()
     }
@@ -322,10 +328,19 @@ class MainActivity : ComponentActivity() {
                 intent.getBooleanExtra("stub_events_not_eligible", false) -> StubEventsScenario.NOT_ELIGIBLE
                 else -> StubEventsScenario.STANDARD
             },
+            stubEngagement = when {
+                !BuildConfig.DEBUG -> StubEngagementScenario.STANDARD
+                intent.getBooleanExtra("stub_no_public_name", false) -> StubEngagementScenario.NO_PUBLIC_NAME
+                intent.getBooleanExtra("stub_rankings_fail_toggle", false) -> StubEngagementScenario.TOGGLE_FAIL
+                intent.getBooleanExtra("stub_badges_down", false) -> StubEngagementScenario.BADGES_DOWN
+                intent.getBooleanExtra("stub_network_down", false) -> StubEngagementScenario.NETWORK_DOWN
+                intent.getBooleanExtra("stub_spend_unpublished", false) -> StubEngagementScenario.SPEND_UNPUBLISHED
+                else -> StubEngagementScenario.STANDARD
+            },
+            stubOpenEngagement = BuildConfig.DEBUG && intent.getBooleanExtra("stub_open_engagement", false),
         )
         val giving = BuildConfig.DEBUG && intent.getBooleanExtra("preview_giving", false)
-        val impact = BuildConfig.DEBUG && intent.getBooleanExtra("preview_impact", false)
-        val network = BuildConfig.DEBUG && intent.getBooleanExtra("preview_network", false)
+        val impact = BuildConfig.DEBUG && (intent.getBooleanExtra("preview_impact", false) || intent.getBooleanExtra("preview_network", false))
         val events = BuildConfig.DEBUG && intent.getBooleanExtra("preview_events", false)
         val settings = BuildConfig.DEBUG && intent.getBooleanExtra("preview_settings", false)
         val partner = BuildConfig.DEBUG && intent.getBooleanExtra("preview_partner", false)
@@ -361,6 +376,7 @@ class MainActivity : ComponentActivity() {
                             dashboard = WireDashboard(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
                             giving = GivingKit(WireGiving(ProductClient(BuildConfig.DAD_API_ORIGIN, session))),
                             events = WireEvents(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
+                            engagement = WireEngagement(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
                             external = ExternalSignInDeps(
                                 // No Credential Manager provider is linked, so a configured ID alone never switches a method on.
                                 capabilities = SignInCapabilities.of(SignInConfig(BuildConfig.DAD_GOOGLE_WEB_CLIENT_ID, BuildConfig.DAD_PASSKEY_RP_ID)),
@@ -415,15 +431,17 @@ class MainActivity : ComponentActivity() {
                                 // starts true), so there is no load-delay gap to short-circuit.
                                 GiftScreen(viewModel(factory = GivingModel.previewFactory()), stubComplete = { })
                             } else if (impact) {
-                                ImpactHome(viewModel(factory = EngagementModel.previewFactory()))
-                            } else if (network) {
-                                NetworkBadgesHome(viewModel(factory = NetworkBadgesModel.previewFactory()))
+                                EngagementHome(
+                                    viewModel(factory = EngagementModel.previewFactory()),
+                                    publicOrigin = "https://dad.example",
+                                    sharer = ReferralShareAction(AndroidReferralSharer(this@MainActivity)),
+                                )
                             } else if (events) {
                                 EventsScreen(viewModel(factory = EventsModel.previewFactory()))
                             } else if (settings) {
                                 SettingsHome(viewModel(factory = SettingsModel.previewFactory()))
                             } else {
-                                DonorShell(model, openGiftAtLaunch = launch.stubOpenGift)
+                                DonorShell(model, publicOrigin = linkPublicOrigin, openGiftAtLaunch = launch.stubOpenGift, openEngagementAtLaunch = launch.stubOpenEngagement)
                             }
                         is RoleRouter.Root.Unauthenticated -> UnauthenticatedStack(
                             notice = model.notice,
@@ -440,13 +458,25 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** The initiative whose spend drill-in is open (A-3), saved so the screen survives a configuration change. */
+private data class SpendTarget(val id: String, val title: String)
+
+private val SpendTargetSaver = androidx.compose.runtime.saveable.Saver<SpendTarget?, List<String>>(
+    save = { target -> target?.let { listOf(it.id, it.title) } ?: emptyList() },
+    restore = { saved -> if (saved.size == 2) SpendTarget(saved[0], saved[1]) else null },
+)
+
 /** The donor shell: the landing, with Settings (sign-out and account deletion) one tap away. */
 @Composable
-private fun DonorShell(model: AccountModel, openGiftAtLaunch: Boolean = false) {
+private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaunch: Boolean = false, openEngagementAtLaunch: Boolean = false) {
     var inSettings by rememberSaveable { mutableStateOf(false) }
     var inHistory by rememberSaveable { mutableStateOf(false) }
     var inGift by rememberSaveable { mutableStateOf(openGiftAtLaunch) }
     var inEvents by rememberSaveable { mutableStateOf(false) }
+    var inEngagement by rememberSaveable { mutableStateOf(openEngagementAtLaunch) }
+    var spendTarget by rememberSaveable(stateSaver = SpendTargetSaver) { mutableStateOf<SpendTarget?>(null) }
+    val engagementService = model.engagement
+    val context = androidx.compose.ui.platform.LocalContext.current
     val service = model.settings
     val dashboard = model.dashboard
     val kit = model.giving
@@ -461,6 +491,27 @@ private fun DonorShell(model: AccountModel, openGiftAtLaunch: Boolean = false) {
         BackHandler { inGift = false }
         holder.SaveableStateProvider("gift") {
             GiftScreen(giving, stubComplete = kit.stubComplete, onClose = { inGift = false }, onSignedOut = { inGift = false; model.onSignedOut() })
+        }
+    } else if (spendTarget != null && engagementService != null) {
+        val target = spendTarget!!
+        holder.SaveableStateProvider("spend") {
+            InitiativeSpendScreen(
+                viewModel(key = "spend-${model.generation}-${target.id}", factory = InitiativeSpendModel.factory(engagementService, target.id)),
+                title = target.title,
+                onClose = { spendTarget = null },
+                onSignedOut = { spendTarget = null; model.onSignedOut() },
+            )
+        }
+    } else if (inEngagement && engagementService != null) {
+        BackHandler { inEngagement = false }
+        holder.SaveableStateProvider("engagement") {
+            EngagementHome(
+                viewModel(key = "engagement-${model.generation}", factory = EngagementModel.factory(engagementService)),
+                publicOrigin = publicOrigin,
+                sharer = remember { ReferralShareAction(AndroidReferralSharer(context)) },
+                onClose = { inEngagement = false },
+                onSignedOut = { inEngagement = false; model.onSignedOut() },
+            )
         }
     } else if (inEvents && eventsService != null) {
         BackHandler { inEvents = false }
@@ -502,6 +553,8 @@ private fun DonorShell(model: AccountModel, openGiftAtLaunch: Boolean = false) {
                         giving = giving,
                         onOpenGift = { inGift = true },
                         onOpenEvents = if (eventsService != null) ({ inEvents = true }) else null,
+                        onOpenEngagement = if (engagementService != null) ({ inEngagement = true }) else null,
+                        onOpenSpend = if (engagementService != null) ({ id, title -> spendTarget = SpendTarget(id, title) }) else null,
                         onOpenHistory = { inHistory = true },
                         onSignedOut = { model.onSignedOut() },
                     )
@@ -547,201 +600,6 @@ private fun DonorLanding(model: AccountModel, onSettings: (() -> Unit)? = null, 
         if (BuildConfig.DAD_API_ORIGIN.isBlank()) Text("Preview · Sample account", style = MaterialTheme.typography.labelLarge)
     }
 }
-
-/**
- * Phase 4 impact home (A-*, S-*, I-*, K-*): today's initiative rotation card, lifetime impact
- * totals, the 30-day streak bar + milestone progress, the rankings card with an INLINE opt-out
- * toggle (no dialog, per the Phase 3 UITest lesson), and the spend-by-category totals.
- */
-@Composable
-private fun ImpactHome(model: EngagementModel) {
-    LaunchedEffect(Unit) { model.load() }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .safeDrawingPadding()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp)
-            .testTag("impact-home"),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text("Your impact", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
-        when (val phase = model.phase) {
-            is EngagementPhase.Loading ->
-                CircularProgressIndicator(modifier = Modifier.testTag("impact-loading"))
-            is EngagementPhase.Failed ->
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(phase.message, modifier = Modifier.testTag("impact-error"))
-                    DadPrimaryButton("Try again") { model.load() }
-                }
-            is EngagementPhase.Ready -> model.snapshot?.let { ImpactContent(model, it) }
-        }
-        model.actionError?.let { Text(it, modifier = Modifier.testTag("impact-action-error")) }
-    }
-}
-
-@Composable
-private fun ImpactContent(model: EngagementModel, snapshot: EngagementSnapshot) {
-    // Today's initiative rotation card (A-1/A-2).
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(snapshot.today.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("today-title"))
-        Text(snapshot.today.summary, style = MaterialTheme.typography.bodyMedium)
-        snapshot.today.headlineMetrics.forEach { metric ->
-            Text("${metric.label}: ${metric.value}", style = MaterialTheme.typography.bodySmall)
-        }
-    }
-
-    // Lifetime impact total — "--" when unknown, never $0.
-    Text("Lifetime given", style = MaterialTheme.typography.labelMedium)
-    Text(snapshot.impact.givenLabel, style = MaterialTheme.typography.displaySmall, modifier = Modifier.testTag("impact-given"))
-
-    // Streak (S-1/S-2/S-3): count, 30-day bar (color + shape), milestone progress.
-    snapshot.streak?.let { streak ->
-        Text(streak.countLabel, style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("streak-count"))
-        DadStreakBar(filled = streak.barFilled)
-        Text(streak.progressLabel, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("streak-progress"))
-        if (streak.atRisk) {
-            Text("Give today to keep your streak.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("streak-atrisk"))
-        }
-    }
-
-    // Rankings (K-2): opt-out hides the position entirely — inline toggle, never a name list.
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("Rankings", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
-        if (snapshot.ranking.isOptedOut) {
-            Text("You're not shown in rankings.", modifier = Modifier.testTag("ranking-optedout"))
-            Button(onClick = { model.setRankingOptIn(true) }, modifier = Modifier.testTag("ranking-optin")) { Text("Show my ranking") }
-        } else {
-            snapshot.ranking.nationalLabel?.let {
-                Text(it, modifier = Modifier.testTag("ranking-national"))
-            }
-            snapshot.ranking.cityLabel?.let { Text(it, modifier = Modifier.testTag("ranking-city")) }
-            if (snapshot.ranking.nationalLabel == null && snapshot.ranking.cityLabel == null) {
-                Text("Not ranked yet.", modifier = Modifier.testTag("ranking-unranked"))
-            }
-            Button(onClick = { model.setRankingOptIn(false) }, modifier = Modifier.testTag("ranking-optout")) { Text("Hide my ranking") }
-        }
-    }
-
-    // Spend-by-category totals (A-3) — totals only, never a line-item ledger.
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("Where it went", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
-        Text("Total: ${snapshot.spend.totalLabel}", modifier = Modifier.testTag("spend-total"))
-        snapshot.spend.categories.forEach { category ->
-            Text("${category.category}: ${category.amountLabel}", style = MaterialTheme.typography.bodySmall)
-        }
-    }
-}
-
-
-// Network page + 24-badge grid (PRD N-1..N-3, B-1..B-4). Badge state is conveyed in TEXT (the
-// earned/locked a11y label + rule/perk detail line), never by colour alone, and anonymous
-// referrals are shown only as a count — never named.
-@Composable
-private fun NetworkBadgesHome(model: NetworkBadgesModel) {
-    LaunchedEffect(Unit) { model.load() }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .safeDrawingPadding()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp)
-            .testTag("network-home"),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text("Your network & badges", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
-        when (val phase = model.phase) {
-            is NetworkBadgesPhase.Loading ->
-                CircularProgressIndicator(modifier = Modifier.testTag("network-loading"))
-            is NetworkBadgesPhase.Failed ->
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(phase.message, modifier = Modifier.testTag("network-error"))
-                    DadPrimaryButton("Try again") { model.load() }
-                }
-            is NetworkBadgesPhase.Ready -> model.snapshot?.let { NetworkBadgesContent(model, it) }
-        }
-        model.actionError?.let { Text(it, modifier = Modifier.testTag("network-action-error")) }
-    }
-}
-
-@Composable
-private fun NetworkBadgesContent(model: NetworkBadgesModel, snapshot: NetworkBadgesSnapshot) {
-    // Network summary (N-1/N-2): active count + combined annualized + next milestone.
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("Your network", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
-        Text(snapshot.network.activeLabel, style = MaterialTheme.typography.displaySmall, modifier = Modifier.testTag("network-active"))
-        Text(snapshot.network.annualizedLabel, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("network-annualized"))
-        snapshot.network.nextMilestone?.let {
-            Text(it.progressLabel, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("network-milestone"))
-        }
-    }
-
-    // Named invitees (N-3), then the anonymous count — anonymous referrals are counted, never named.
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        snapshot.network.namedInvitees.forEach { invitee ->
-            val suffix = if (invitee.active) "giving" else "paused"
-            Text("${invitee.name} — $suffix", style = MaterialTheme.typography.bodySmall)
-        }
-        snapshot.network.anonymousLabel?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("network-anonymous"))
-        }
-    }
-
-    // Sharing visibility (opt-in): off = anonymous, no links; choosing a public name mints links.
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("Visibility", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
-        val sharing = snapshot.sharing
-        Text(sharing.visibilityLabel, modifier = Modifier.testTag("sharing-visibility"))
-        if (sharing.isPublic) {
-            sharing.shareLink?.let { Text("Share: $it", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("sharing-link")) }
-            sharing.inPersonLink?.let { Text("In person: $it", style = MaterialTheme.typography.bodySmall) }
-        } else {
-            var publicName by rememberSaveable { mutableStateOf("") }
-            OutlinedTextField(
-                value = publicName, onValueChange = { publicName = it.take(MAX_PUBLIC_NAME) },
-                label = { Text("First name and last initial") }, singleLine = true,
-                modifier = Modifier.fillMaxWidth().testTag("sharing-name"),
-            )
-            Button(
-                onClick = { model.choosePublicName(publicName) },
-                enabled = publicName.isNotBlank(),
-                modifier = Modifier.testTag("sharing-optin"),
-            ) { Text("Show my name & get a referral link") }
-        }
-    }
-
-    // 24-badge grid (B-1..B-4): earned-in-colour / greyed-with-rule, state in TEXT for a11y.
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Badges", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
-        Text(snapshot.grid.summaryLabel, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("badge-summary"))
-        snapshot.grid.badges.chunked(2).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEach { badge -> BadgeTile(badge, Modifier.weight(1f)) }
-                if (row.size < 2) Spacer(Modifier.weight(1f))
-            }
-        }
-    }
-}
-
-@Composable
-private fun BadgeTile(badge: Badge, modifier: Modifier = Modifier) {
-    // Earned badges render in the brand colour; locked badges greyed. State is ALSO in the a11y
-    // label + the detail line text (never colour alone) — a colour-blind or screen-reader user
-    // gets earned/locked from text (B-1, WCAG).
-    val dark = isSystemInDarkTheme()
-    val color = if (badge.earned) DadTheme.brandAccent(dark) else DadTheme.color(if (dark) "dkmut" else "muted")
-    Column(
-        modifier = modifier
-            .testTag(if (badge.earned) "badge-earned-${badge.code}" else "badge-locked-${badge.code}")
-            .semantics { contentDescription = badge.accessibilityLabel },
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        Text(badge.title, style = MaterialTheme.typography.labelLarge, color = color)
-        Text(if (badge.earned) "Earned" else "Locked", style = MaterialTheme.typography.labelSmall, color = color)
-        Text(badge.detailLine, style = MaterialTheme.typography.bodySmall)
-    }
-}
-
 
 // Account & settings (PRD §6.11/§6.12): profile header, notification + privacy toggles, volunteer
 // opt-in, sign out, and the store-mandated delete-account flow with a typed-word confirm gate.
