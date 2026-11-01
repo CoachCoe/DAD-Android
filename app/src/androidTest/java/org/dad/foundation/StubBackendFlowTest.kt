@@ -2,6 +2,7 @@ package org.dad.foundation
 
 import android.content.Intent
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -113,12 +114,30 @@ class StubBackendFlowTest {
         }
     }
 
-    @Test fun partnerSignInIsAnHonestNotice() {
+    @Test fun partnerSignsInWithAPastedLinkAndSignsOut() {
         launch().use {
             waitFor("role-partner")
             compose.tapSafely("role-partner")
-            waitFor("partner-sign-in-notice")
-            compose.onNodeWithTag("partner-sign-in-notice").assertIsDisplayed()
+            compose.enterText("partner-sign-in-email", "ada@acme.com")
+            waitEnabled("partner-sign-in-submit")
+            compose.tapSafely("partner-sign-in-submit")
+            waitFor("partner-check-email")
+            compose.enterText("partner-paste-link", "https://stub.invalid/partner/accept#token=goodpartner0123456789abcdefghijklmnop")
+            waitEnabled("partner-paste-submit")
+            compose.tapSafely("partner-paste-submit")
+            waitFor("partner-committed")
+            compose.onNodeWithTag("partner-organization").assertTextEquals("Acme Corp")
+            compose.tapSafely("partner-tab-organization")
+            compose.tapSafely("partner-sign-out")
+            waitFor("role-partner")
+        }
+    }
+
+    @Test fun aStoredPartnerSessionOpensThePortal() {
+        launch("stub_partner_signed_in").use {
+            waitFor("partner-committed")
+            compose.tapSafely("partner-tab-organization")
+            waitFor("partner-invite")
         }
     }
 }

@@ -1,19 +1,16 @@
 # DAD Android
 
 Kotlin/Jetpack Compose donor and partner app using DAD-Main's Go API. Separate native
-apps were selected on 18 October 2026. The session, transport, and deep-link foundation
-is production-grade. The product screens (giving, impact, network and badges, events,
-settings, partner portal) are built against service seams and are reachable today only
-through DEBUG preview launch extras (`preview_giving`, `preview_events`, and so on);
-wiring them to the generated client is the remaining integration work (phased; Phase 1 below is done).
+apps were selected on 18 October 2026. Every donor and partner screen runs against the generated client; the
+DEBUG preview launch extras (`preview_giving`, `preview_events`, `preview_partner`, and so on) render the same
+screens over synthetic services for design review and are compiled out of release builds.
 
 **Wired against the API (Phase 1):** donor phone + SMS sign-in (`beginPhoneSignIn`/`finishPhoneSignIn`,
 existing accounts only), claim-link sign-in, profile read, settings load/save (`savePreferences`),
 refresh, logout and real account deletion. Authenticated calls go through `ProductClient.perform` ->
 `AccountSession.authorized` (single-flight refresh, one bounded 401 retry, epoch-guarded); sign-in
 installs credentials through `AccountSession.establish` so the session owns the await. Settings is
-reachable from the donor shell; sign-out, deletion and a revoked session return to sign-in. Partner
-sign-in is not wired (it shows an honest notice). A
+reachable from the donor shell; sign-out, deletion and a revoked session return to sign-in. A
 release build with no `dadApiOrigin` shows a "not configured" notice and never serves synthetic data.
 
 **Wired against the API (Phase 2, donor home):** the signed-in donor landing now shows the real dashboard
@@ -29,7 +26,7 @@ referrals or total given) are shown as unknown, never as zero. A failed refresh 
 notice; a 401 refreshes once and then signs out; an undocumented 429 is "too many requests", any other
 undocumented status is "unavailable". These five GETs are decoded from raw JSON in `WireDashboard` with strict
 null handling, because the generated Kotlin models flatten the dashboard's `oneOf` and turn nullable members
-into non-null types that Gson would silently fill with zeros. Not wired yet: `saveProfile`, receipt PDF/share. Engagement (see below) is wired; the partner portal remains a DEBUG preview.
+into non-null types that Gson would silently fill with zeros.
 
 Account deletion calls `POST /donor/me/delete` first and wipes local state (Keystore credentials and
 attribution) only on success; a 409 (active monthly gift or open checkout) is explained and nothing is
@@ -57,8 +54,8 @@ configuration deprecation diagnostics; those upstream warnings are not suppresse
 
 ## Contract, sessions, and transport
 
-`foundation.lock.json` pins the mobile foundation release (currently 2.7.0, tag
-`mobile-foundation-v2.7.0`) and its manifest
+`foundation.lock.json` pins the mobile foundation release (currently 2.9.0, tag
+`mobile-foundation-v2.9.0`) and its manifest
 SHA-256. The vendored release is verified before code generation. The build invokes pinned
 OpenAPI Generator CLI 7.20.0 and generates Retrofit coroutine interfaces and Gson models
 for the operations allow-listed in `scripts/prepare-client.mjs`. No client is generated
@@ -220,3 +217,29 @@ at once and reverts with an inline notice if the save fails). Today's initiative
 - **Test stub.** `stub_backend` + `stub_signed_in` serves badges, network, sharing, conversions and a spend
   (`stub_open_engagement`, `stub_no_public_name`, `stub_rankings_fail_toggle`, `stub_badges_down`,
   `stub_network_down`, `stub_spend_unpublished`). `preview_impact` still shows the in-memory preview.
+
+## Account (contract 2.9.0)
+
+Settings carries the rest of the donor account: contact details (`saveProfile`: ZIP, city, phone), an email change
+(`requestEmailChange`; the emailed `/account/email-change#token=` link is claimed like a sign-in link), signed-in
+devices (`sessions`, `revokeSession`, `revokeOtherSessions`, and `logoutAll` to sign out everywhere), the employer
+programme (`employeeTeam`, `employeeEnroll` with a company code, `employeeJoinTeam`), and the referral code as a
+Google Wallet pass (`walletProviders` / `googlePass`, offered only when the server says Google Wallet is configured).
+
+## Partner portal (contract 2.9.0)
+
+A partner signs in with an emailed link: "Partner" on the start screen asks for a work email
+(`partnerRequestSignIn`); the `/partner/accept#token=` link, opened on the phone or pasted on "Check your email", is
+exchanged for a 12-hour bearer (`partnerAcceptInvite`; a used or expired link is 422, a blocked partner 403). The
+bearer is kept in its own Keystore entry (`partner-session`), cannot be refreshed, and is forgotten on expiry, on a
+401, or on sign-out (local first, then `partnerSignOut`), returning the partner to sign-in.
+
+The portal has four sections. **Overview** shows only verified figures (§7.3; an unverified figure is left out,
+never estimated) and spend by category. **Initiatives** lists the partner's initiatives and their metrics.
+**People** shows the employee-programme summary (suppressed below the privacy threshold) and team standings.
+**Organization** edits the profile, workforce size and logo (PNG, picked with the system photo picker), shows the
+company code with its sign-up QR and share link, manages users (admins invite by name, email and role and remove
+others after confirmation; viewers are read-only), and lets admins export a PDF impact report or re-download a
+retained one (an aged-out report is a 404, "no longer available"). Reports are shared through the FileProvider and
+capped at 16 MiB. The `stub_backend` transport serves the same routes (`stub_partner_signed_in` starts with a stored
+partner session; links whose token starts `goodpartner` are accepted).

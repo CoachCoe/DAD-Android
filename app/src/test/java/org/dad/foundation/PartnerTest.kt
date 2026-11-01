@@ -13,6 +13,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.time.OffsetDateTime
 import java.util.Date
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -77,12 +78,19 @@ class PartnerTest {
     // --- Model ---
     private class FakeService(
         var role: PartnerRole = PartnerRole.ADMIN,
-        var pending: Boolean = false,
         var fail: Boolean = false,
         var peopleError: Exception? = null,
         var pushError: Exception? = null,
+        var actionError: Exception? = null,
+        var retainedError: Exception? = null,
+        var hasLogo: Boolean = false,
     ) : PartnerService {
-        var invited = mutableListOf<Pair<String, PartnerRole>>()
+        var invited = mutableListOf<Triple<String, String, PartnerRole>>()
+        val profiles = mutableListOf<Pair<String, String>>()
+        val workforce = mutableListOf<Int>()
+        val logos = mutableListOf<ByteArray?>()
+        var reports = 0
+        var signedOut = false
         var removed = mutableListOf<String>()
         var pushRegistered = false
         var pushUnregistered = false
@@ -93,10 +101,9 @@ class PartnerTest {
         )
         var selfId: String? = "u1"
         override suspend fun overview(): PartnerOverview {
-            if (pending) throw PartnerPendingApproval()
             if (fail) throw AccountFailure.SignedOut
             return PartnerOverview("Acme", "d", role, "AC", VerifiedMoney(1, true), VerifiedMoney(1, true),
-                1, VerifiedCount(1, true), 42, 120, 35, Date(), false, userId = selfId)
+                1, VerifiedCount(1, true), 42, workforce.lastOrNull() ?: 120, 35, Date(), hasLogo, userId = selfId)
         }
         override suspend fun initiatives() = emptyList<PartnerInitiative>()
         override suspend fun spend() = emptyList<PartnerSpendCategory>()
@@ -104,9 +111,21 @@ class PartnerTest {
             peopleError?.let { throw it }
             return PartnerPeople(42, 120, 0, 0, 0, 0, 0, false)
         }
-        override suspend fun users() = users
-        override suspend fun inviteUser(email: String, role: PartnerRole) { invited.add(email to role) }
-        override suspend fun removeUser(id: String) { removed.add(id); users.removeAll { it.id == id } }
+        override suspend fun teams() = emptyList<TeamStanding>()
+        override suspend fun users() = users.toList()
+        override suspend fun inviteUser(email: String, name: String, role: PartnerRole) {
+            actionError?.let { throw it }
+            invited.add(Triple(email, name, role))
+        }
+        override suspend fun removeUser(id: String) { actionError?.let { throw it }; removed.add(id); users.removeAll { it.id == id } }
+        override suspend fun saveProfile(organization: String, description: String) { actionError?.let { throw it }; profiles.add(organization to description) }
+        override suspend fun saveWorkforce(size: Int) { workforce.add(size) }
+        override suspend fun logo() = "LOGO".toByteArray()
+        override suspend fun saveLogo(png: ByteArray?) { logos.add(png) }
+        override suspend fun exports() = listOf(PartnerExport("r1", OffsetDateTime.now(), "A", 1, 1, downloadable = true))
+        override suspend fun report(): ByteArray { reports++; return "%PDF".toByteArray() }
+        override suspend fun retainedReport(id: String): ByteArray { retainedError?.let { throw it }; return "%PDF".toByteArray() }
+        override suspend fun signOut() { signedOut = true }
         override suspend fun registerPushDevice(token: String) { pushError?.let { throw it }; pushRegistered = true }
         override suspend fun unregisterPushDevice() { pushUnregistered = true }
     }
@@ -116,13 +135,6 @@ class PartnerTest {
         model.load(); dispatcher.scheduler.advanceUntilIdle()
         assertEquals(PartnerPhase.Ready, model.phase)
         assertEquals(PartnerRole.ADMIN, model.role)
-    }
-
-    @Test fun pendingApprovalGate() = runTest {
-        val model = PartnerModel(FakeService(pending = true))
-        model.load(); dispatcher.scheduler.advanceUntilIdle()
-        assertEquals(PartnerPhase.Pending, model.phase)
-        assertNull(model.snapshot)
     }
 
     @Test fun loadFailureSurfacesFailed() = runTest {
@@ -135,7 +147,7 @@ class PartnerTest {
         val svc = FakeService(role = PartnerRole.VIEWER)
         val model = PartnerModel(svc)
         model.load(); dispatcher.scheduler.advanceUntilIdle()
-        model.inviteUser("b@x.com", PartnerRole.VIEWER); dispatcher.scheduler.advanceUntilIdle()
+        model.inviteUser("b@x.com", "Bea", PartnerRole.VIEWER); dispatcher.scheduler.advanceUntilIdle()
         model.removeUser("u1"); dispatcher.scheduler.advanceUntilIdle()
         assertTrue(svc.invited.isEmpty()) // gated client-side, never hit service
         assertTrue(svc.removed.isEmpty())
@@ -146,17 +158,19 @@ class PartnerTest {
         val svc = FakeService()
         val model = PartnerModel(svc)
         model.load(); dispatcher.scheduler.advanceUntilIdle()
-        model.inviteUser("b@x.com", PartnerRole.VIEWER); dispatcher.scheduler.advanceUntilIdle()
+        model.inviteUser("b@x.com", "Bea", PartnerRole.VIEWER); dispatcher.scheduler.advanceUntilIdle()
         assertEquals(1, svc.invited.size)
     }
 
-    @Test fun pushRegisterAndUnregister() = runTest {
+    @Test fun pushRegistersAndSignOutUnregistersThenEndsTheSession() = runTest {
         val svc = FakeService()
         val model = PartnerModel(svc)
         model.registerPush("t"); dispatcher.scheduler.advanceUntilIdle()
-        model.unregisterPush(); dispatcher.scheduler.advanceUntilIdle()
+        model.signOut(); dispatcher.scheduler.advanceUntilIdle()
         assertTrue(svc.pushRegistered)
         assertTrue(svc.pushUnregistered)
+        assertTrue(svc.signedOut)
+        assertTrue(model.signedOut)
     }
 
     @Test fun endedSessionOnASecondaryReadFailsTheLoad() = runTest {
@@ -199,7 +213,7 @@ class PartnerTest {
         val svc = FakeService()
         val model = PartnerModel(svc)
         model.load(); dispatcher.scheduler.advanceUntilIdle()
-        model.inviteUser("not-an-email", PartnerRole.VIEWER); dispatcher.scheduler.advanceUntilIdle()
+        model.inviteUser("not-an-email", "Bea", PartnerRole.VIEWER); dispatcher.scheduler.advanceUntilIdle()
         assertTrue(svc.invited.isEmpty())
         assertTrue(model.actionError != null)
     }
@@ -243,7 +257,140 @@ class PartnerTest {
         val model = PartnerModel(svc)
         model.load(); dispatcher.scheduler.advanceUntilIdle()
         assertEquals("u3", model.snapshot?.selfId)
-        assertEquals("u3", svc.signedInUserId())
         assertFalse(model.canRemove(svc.users.first { it.id == "u3" }))
+    }
+
+    private fun loaded(svc: FakeService) = PartnerModel(svc).also { it.load(); dispatcher.scheduler.advanceUntilIdle() }
+
+    @Test fun inviteNeedsANameSendsItTrimmedAndExplainsAConflict() = runTest {
+        val svc = FakeService()
+        val model = loaded(svc)
+        model.inviteUser("b@x.com", "  ", PartnerRole.VIEWER); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals("Enter their name.", model.actionError)
+        model.inviteUser(" new@acme.com ", " Nell ", PartnerRole.ADMIN); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(Triple("new@acme.com", "Nell", PartnerRole.ADMIN), svc.invited.single())
+        assertEquals("Invitation sent to new@acme.com.", model.notice)
+        svc.actionError = AccountFailure.Conflict
+        model.inviteUser("taken@acme.com", "Tak", PartnerRole.VIEWER); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals("That email already signs in to DAD with another role or organization.", model.actionError)
+    }
+
+    @Test fun anEndedSessionDuringAnActionLeavesThePortal() = runTest {
+        val svc = FakeService()
+        val model = loaded(svc)
+        svc.actionError = AccountFailure.SignedOut
+        model.removeUser("u2"); dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(model.signedOut)
+    }
+
+    @Test fun profileIsValidatedTrimmedAndReloaded() = runTest {
+        val svc = FakeService()
+        val model = loaded(svc)
+        model.saveProfile("  ", "x")
+        assertEquals(PartnerModel.PROFILE_RULE, model.actionError)
+        model.saveProfile("a".repeat(201), "")
+        assertEquals(PartnerModel.PROFILE_RULE, model.actionError)
+        assertTrue(svc.profiles.isEmpty())
+        model.saveProfile(" Acme Co ", " Builds wells. "); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals("Acme Co" to "Builds wells.", svc.profiles.single())
+        assertEquals("Organization profile saved.", model.notice)
+    }
+
+    @Test fun viewerCannotEditProfileWorkforceLogoOrExport() = runTest {
+        val svc = FakeService(role = PartnerRole.VIEWER)
+        val model = loaded(svc)
+        model.saveProfile("Acme", "")
+        model.saveWorkforce("300")
+        model.saveLogo("P".toByteArray())
+        model.exportReport()
+        dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(svc.profiles.isEmpty() && svc.workforce.isEmpty() && svc.logos.isEmpty())
+        assertEquals(0, svc.reports)
+        assertTrue(model.snapshot!!.exports.isEmpty())
+    }
+
+    @Test fun workforceMustBeAWholeNumber() = runTest {
+        val svc = FakeService()
+        val model = loaded(svc)
+        for (bad in listOf("", "-1", "12.5", "lots")) {
+            model.saveWorkforce(bad)
+            assertEquals(bad, PartnerModel.WORKFORCE_RULE, model.actionError)
+        }
+        model.saveWorkforce(" 300 "); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(listOf(300), svc.workforce)
+        assertEquals(300, model.snapshot!!.overview.workforceSize)
+    }
+
+    @Test fun logoLoadsWhenPresentAndCanBeRemoved() = runTest {
+        val svc = FakeService(hasLogo = true)
+        val model = loaded(svc)
+        assertEquals("LOGO", model.snapshot!!.logo?.decodeToString())
+        model.saveLogo(null); dispatcher.scheduler.advanceUntilIdle()
+        assertNull(model.snapshot!!.logo)
+        assertEquals(listOf<ByteArray?>(null), svc.logos)
+        assertEquals("Logo removed.", model.notice)
+    }
+
+    @Test fun exportHandsOverAPdfOnceAndAnAgedOutReportSaysSo() = runTest {
+        val svc = FakeService(retainedError = AccountFailure.NotFound)
+        val model = loaded(svc)
+        model.exportReport(); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals("%PDF", model.report?.pdf?.decodeToString())
+        model.reportShared()
+        assertNull(model.report)
+        model.download(model.snapshot!!.exports.first()); dispatcher.scheduler.advanceUntilIdle()
+        assertNull(model.report)
+        assertEquals("That report is no longer available. Export a new one.", model.actionError)
+    }
+
+    private class FakeSignIn(var error: Exception? = null) : PartnerSignInService {
+        val requested = mutableListOf<String>()
+        val accepted = mutableListOf<String>()
+        override suspend fun requestSignInLink(email: String) { error?.let { throw it }; requested.add(email) }
+        override suspend fun accept(token: String) { error?.let { throw it }; accepted.add(token) }
+    }
+
+    @Test fun partnerSignInRequestsALinkThenAcceptsAPastedLinkOrToken() = runTest {
+        val svc = FakeSignIn()
+        val model = PartnerSignInModel(svc)
+        model.email = "nope"
+        assertFalse(model.canSubmit)
+        model.email = " ada@acme.com "
+        model.submit(); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(listOf("ada@acme.com"), svc.requested)
+        assertEquals("ada@acme.com", model.sentTo)
+        model.acceptPasted(" https://dad.example/partner/accept#token=abc123 "); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(PartnerSignInPhase.SignedIn, model.phase)
+        model.acceptPasted("def456"); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(listOf("abc123", "def456"), svc.accepted)
+        model.acceptPasted("two words")
+        assertEquals(PartnerSignInPhase.Failed("Paste the whole sign-in link from your email."), model.phase)
+    }
+
+    @Test fun aUsedLinkAndABlockedAccountAreExplained() = runTest {
+        val svc = FakeSignIn(AccountFailure.InvalidInput)
+        val model = PartnerSignInModel(svc)
+        model.accept("t"); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(PartnerSignInPhase.Failed("That sign-in link has expired or was already used. Request a new one."), model.phase)
+        svc.error = AccountFailure.Forbidden
+        model.accept("t"); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(PartnerSignInPhase.Failed("This partner account can’t sign in. Ask your organization’s admin or DAD support."), model.phase)
+    }
+
+    @Test fun partnerSessionLastsTwelveHoursThenIsForgotten() {
+        var now = 1_800_000_000_000L
+        val store = MemoryCredentialStore()
+        val session = PartnerSession(store) { now }
+        session.install("P1")
+        assertEquals("P1", session.token())
+        now += PartnerSession.LIFETIME_MILLIS + 1
+        assertFalse(session.isSignedIn)
+        assertNull(store.load())
+    }
+
+    private class MemoryCredentialStore(private var value: Credentials? = null) : CredentialStore {
+        override fun load() = value
+        override fun save(value: Credentials) { this.value = value }
+        override fun clear() { value = null }
     }
 }

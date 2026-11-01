@@ -47,8 +47,14 @@ fun UnauthenticatedStack(
     onSignedIn: () -> Unit,
     /** Claims a sign-in link pasted by the donor; false when the text is not a DAD sign-in link. */
     onPastedLink: (String) -> Boolean = { false },
+    partnerSignIn: PartnerSignInService? = null,
+    /** A tapped partner sign-in link's token, accepted on the partner sign-in screen. */
+    partnerToken: String? = null,
+    onPartnerTokenConsumed: () -> Unit = {},
+    onPartnerSignedIn: () -> Unit = {},
 ) {
     var step by rememberSaveable { mutableStateOf(AuthStep.RoleSelect) }
+    LaunchedEffect(partnerToken) { if (partnerToken != null) step = AuthStep.Partner }
     BackHandler(enabled = step != AuthStep.RoleSelect) {
         step = if (step == AuthStep.Phone || step == AuthStep.EmailLink || step == AuthStep.Password || step == AuthStep.Signup) AuthStep.Methods
         else AuthStep.RoleSelect
@@ -72,7 +78,11 @@ fun UnauthenticatedStack(
         AuthStep.Signup -> SignupFlow(
             viewModel(key = "signup-$generation", factory = SignupModel.factory(auth.signup)),
             onPastedLink, notice, onBack = { step = AuthStep.Methods })
-        AuthStep.Partner -> PartnerSignInNotice(onBack = { step = AuthStep.RoleSelect })
+        AuthStep.Partner -> if (partnerSignIn != null) PartnerSignInFlow(
+            viewModel(key = "partner-sign-in-$generation", factory = PartnerSignInModel.factory(partnerSignIn)),
+            incomingToken = partnerToken, onTokenConsumed = onPartnerTokenConsumed,
+            onBack = { step = AuthStep.RoleSelect }, onSignedIn = onPartnerSignedIn,
+        ) else RoleSelect(PhoneSignInModel.NOT_CONFIGURED) { role -> if (role == AppRole.DONOR) step = AuthStep.Methods }
     }
 }
 
@@ -130,18 +140,6 @@ private fun SignInMethods(
     }
 }
 
-/** Partner sign-in is an emailed-link flow that lands with the partner wiring phase; say so rather
- *  than offering a donor phone sign-in under a partner label. */
-@Composable
-private fun PartnerSignInNotice(onBack: () -> Unit) {
-    AuthColumn("partner-sign-in-notice") {
-        Text("Partner sign-in", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
-        Spacer(Modifier.height(16.dp))
-        Text("Partner sign-in isn’t available in the app yet. Use the DAD website to sign in as a partner.")
-        Spacer(Modifier.height(16.dp))
-        Button(onClick = onBack, modifier = Modifier.testTag("partner-back")) { Text("Back") }
-    }
-}
 
 /** Phone + SMS one-time-code journey, bound to [PhoneSignInModel]. */
 @Composable

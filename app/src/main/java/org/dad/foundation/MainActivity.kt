@@ -157,6 +157,14 @@ class AccountModel(
         private set
     var wallet: WalletPassService? by mutableStateOf(null)
         private set
+    var partner: PartnerKit? by mutableStateOf(null)
+        private set
+    /** A partner session is in use (and no donor one): the root shows the partner portal. */
+    var partnerSignedIn: Boolean by mutableStateOf(false)
+        private set
+    /** A tapped partner sign-in link waiting for the partner sign-in screen to accept it. */
+    var pendingPartnerToken: String? by mutableStateOf(null)
+        private set
     private var loading = false
     private var pendingProof: String? = null
     private var completedProof: String? = null
@@ -178,7 +186,7 @@ class AccountModel(
             withContext(io) { factory(CoroutineScope(viewModelScope.coroutineContext + io), options) }
                 .also {
                     services = it; signIn = it.signIn; settings = it.settings; passwordSettings = it.passwordSettings; dashboard = it.dashboard; giving = it.giving; events = it.events; engagement = it.engagement
-                    management = it.management; wallet = it.wallet
+                    management = it.management; wallet = it.wallet; partner = it.partner
                     auth = AuthServices(it.signIn, it.signup, it.signInLink, it.passwordSignIn, it.external)
                 }
         } catch (cancelled: CancellationException) { throw cancelled }
@@ -196,6 +204,8 @@ class AccountModel(
         viewModelScope.launch {
             val active = ensureServices()
             hasSession = active != null && active.session.isSignedIn()
+            // Without a donor session, a partner session still within its 12 hours reopens the portal.
+            partnerSignedIn = !hasSession && active?.partner?.session?.isSignedIn == true
             booted = true
             if (hasSession) load() else state = if (active == null) AccountState.Unavailable else AccountState.SignedOut
         }
@@ -256,6 +266,19 @@ class AccountModel(
             }
         }
     }
+    fun onPartnerSignedIn() {
+        notice = null
+        generation++
+        partnerSignedIn = true
+    }
+
+    fun onPartnerSignedOut() {
+        generation++
+        partnerSignedIn = false
+    }
+
+    fun partnerTokenConsumed() { pendingPartnerToken = null }
+
     fun configurationUnavailable() { hasSession = false; notice = PhoneSignInModel.NOT_CONFIGURED; state = AccountState.Unavailable }
     fun receive(value: String, router: LinkRouter): String? {
         return when (val intent = router.route(value)) {
@@ -271,6 +294,13 @@ class AccountModel(
                     if (activeProof == null && completedProof != digest) { activeProof = digest; load(claim = intent.token) }
                     null
                 }
+            }
+            // A partner already in the portal stays put; a donor's app cannot also be a partner's, so the website
+            // takes the link.
+            is LinkIntent.PartnerSignIn -> when {
+                partnerSignedIn -> null
+                hasSession -> value
+                else -> { pendingPartnerToken = intent.token; null }
             }
             is LinkIntent.EmailChange, is LinkIntent.Web -> value
             null -> null
@@ -343,6 +373,7 @@ class MainActivity : ComponentActivity() {
                 else -> StubEngagementScenario.STANDARD
             },
             stubOpenEngagement = BuildConfig.DEBUG && intent.getBooleanExtra("stub_open_engagement", false),
+            stubPartnerSignedIn = BuildConfig.DEBUG && intent.getBooleanExtra("stub_partner_signed_in", false),
         )
         val giving = BuildConfig.DEBUG && intent.getBooleanExtra("preview_giving", false)
         val impact = BuildConfig.DEBUG && (intent.getBooleanExtra("preview_impact", false) || intent.getBooleanExtra("preview_network", false))
@@ -350,7 +381,6 @@ class MainActivity : ComponentActivity() {
         val settings = BuildConfig.DEBUG && intent.getBooleanExtra("preview_settings", false)
         val partner = BuildConfig.DEBUG && intent.getBooleanExtra("preview_partner", false)
         val partnerViewer = BuildConfig.DEBUG && intent.getBooleanExtra("preview_partner_viewer", false)
-        val partnerPending = BuildConfig.DEBUG && intent.getBooleanExtra("preview_partner_pending", false)
         val appContext = applicationContext
         incomingLink = intent.dataString
         val factory = viewModelFactory {
@@ -365,7 +395,8 @@ class MainActivity : ComponentActivity() {
                         // the synthetic fallback.
                         check(BuildConfig.DEBUG) { "DAD_API_ORIGIN must be set for a release build" }
                         val session = AccountSession(PreviewAPI(options.unavailableFirst), PreviewStore(!options.signedOut), scope)
-                        AppServices(session, PreviewSignIn(), PreviewSessionSettings(session))
+                        AppServices(session, PreviewSignIn(), PreviewSessionSettings(session),
+                            partner = PartnerKit(PartnerSession(PreviewStore(signedIn = false)), PreviewPartnerSignIn, PreviewPartnerService()))
                     } else {
                         val session = AccountSession(WireAPI(BuildConfig.DAD_API_ORIGIN), KeystoreCredentialStore(appContext), scope)
                         val attribution = PrefsAttributionStore(appContext)
@@ -385,6 +416,9 @@ class MainActivity : ComponentActivity() {
                             engagement = WireEngagement(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
                             management = WireAccountManagement(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
                             wallet = WireWalletPass(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
+                            partner = PartnerSession(KeystoreCredentialStore(appContext, "partner-session", refreshable = false)).let {
+                                PartnerKit(it, WirePartnerAuth(BuildConfig.DAD_API_ORIGIN, it), WirePartner(BuildConfig.DAD_API_ORIGIN, it))
+                            },
                             external = ExternalSignInDeps(
                                 // No Credential Manager provider is linked, so a configured ID alone never switches a method on.
                                 capabilities = SignInCapabilities.of(SignInConfig(BuildConfig.DAD_GOOGLE_WEB_CLIENT_ID, BuildConfig.DAD_PASSKEY_RP_ID)),
@@ -421,18 +455,29 @@ class MainActivity : ComponentActivity() {
                     // A session-backed shell is the donor journey — the donor landing owns every
                     // account sub-state (loading / ready / unavailable / signed-out) and its own
                     // recovery, so stay on it. Only a genuinely session-less app goes to role-select.
-                    LaunchedEffect(model.booted, model.hasSession) {
-                        if (model.booted) { if (model.hasSession) router.signedIn(AppRole.DONOR) else router.signedOut() }
+                    LaunchedEffect(model.booted, model.hasSession, model.partnerSignedIn) {
+                        if (model.booted) {
+                            when {
+                                model.hasSession -> router.signedIn(AppRole.DONOR)
+                                model.partnerSignedIn -> router.signedIn(AppRole.PARTNER)
+                                else -> router.signedOut()
+                            }
+                        }
                         root = router.root
                     }
+                    val partnerKit = model.partner
                     when (val current = root) {
+                        is RoleRouter.Root.Authenticated if current.role == AppRole.PARTNER && partnerKit != null && !partner && !partnerViewer ->
+                            PartnerPortal(
+                                viewModel(key = "partner-${model.generation}", factory = PartnerModel.factory(partnerKit.service)),
+                                publicOrigin = linkPublicOrigin,
+                                onSignedOut = { model.onPartnerSignedOut() },
+                            )
                         is RoleRouter.Root.Restoring, is RoleRouter.Root.Authenticated ->
-                            if (partnerPending) {
-                                PartnerPortal(viewModel(factory = PartnerModel.previewFactory(pending = true)))
-                            } else if (partnerViewer) {
-                                PartnerPortal(viewModel(factory = PartnerModel.previewFactory(role = PartnerRole.VIEWER)))
+                            if (partnerViewer) {
+                                PartnerPortal(viewModel(factory = PartnerModel.previewFactory(role = PartnerRole.VIEWER)), publicOrigin = "https://dad.example")
                             } else if (partner) {
-                                PartnerPortal(viewModel(factory = PartnerModel.previewFactory()))
+                                PartnerPortal(viewModel(factory = PartnerModel.previewFactory()), publicOrigin = "https://dad.example")
                             } else if (giving) {
                                 // Giving preview exercises the signed-in GiftScreen directly. The
                                 // donor shell reaches Restoring/Authenticated immediately (hasSession
@@ -458,6 +503,10 @@ class MainActivity : ComponentActivity() {
                             onPastedLink = { text -> linkRouter?.let { router -> PastedLink.claimToken(text, router)?.let { model.receive(text.trim(), router); true } } ?: false },
                             generation = model.generation,
                             onSignedIn = { model.onSignedIn() },
+                            partnerSignIn = model.partner?.signIn,
+                            partnerToken = model.pendingPartnerToken,
+                            onPartnerTokenConsumed = { model.partnerTokenConsumed() },
+                            onPartnerSignedIn = { model.onPartnerSignedIn() },
                         )
                     }
                 }
@@ -750,130 +799,3 @@ private fun ToggleRow(label: String, value: Boolean, tag: String, onChange: (Boo
 }
 
 
-// Partner portal (PRD P-*, EM-*, §7). The pending-approval gate shows nothing else (P-2); the
-// loaded portal renders verified-or-hidden Overview tiles (§7.3), spend totals, the Our People
-// rollup with <5 suppression (EM-3), and admin-gated user management (§7.2) — all inline.
-@Composable
-private fun PartnerPortal(model: PartnerModel) {
-    LaunchedEffect(Unit) { model.load() }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .safeDrawingPadding()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp)
-            .testTag("partner-portal"),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text("Partner portal", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
-        when (val phase = model.phase) {
-            is PartnerPhase.Loading ->
-                CircularProgressIndicator(modifier = Modifier.testTag("partner-loading"))
-            is PartnerPhase.Pending ->
-                // P-2: pending approval shows nothing else.
-                Column(modifier = Modifier.testTag("partner-pending"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Awaiting approval", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
-                    Text("Your organization’s account is pending review. We’ll email you when it’s approved.")
-                }
-            is PartnerPhase.Failed ->
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(phase.message, modifier = Modifier.testTag("partner-error"))
-                    DadPrimaryButton("Try again") { model.load() }
-                }
-            is PartnerPhase.Ready -> model.snapshot?.let { PartnerContent(model, it) }
-        }
-        model.actionError?.let { Text(it, modifier = Modifier.testTag("partner-action-error")) }
-    }
-}
-
-@Composable
-private fun PartnerContent(model: PartnerModel, snapshot: PartnerSnapshot) {
-    val overview = snapshot.overview
-    // Overview tiles — a figure renders ONLY when verified (§7.3); unverified is omitted.
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(overview.organization, style = MaterialTheme.typography.titleMedium)
-        overview.verifiedLine?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("partner-verified-line"))
-        }
-        overview.committed.label?.let {
-            Text("Committed: $it", modifier = Modifier.testTag("partner-committed"))
-        }
-        // deployed is unverified in the preview -> intentionally absent (never estimated)
-        overview.peopleReached.label?.let {
-            Text("People reached: $it", modifier = Modifier.testTag("partner-reached"))
-        }
-        overview.enrolledLabel?.let {
-            Text("Enrolled: $it", modifier = Modifier.testTag("partner-enrolled"))
-        }
-    }
-
-    // Our People rollup — figures or the suppression notice (EM-3).
-    snapshot.people?.let { people ->
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Our people", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
-            val notice = people.suppressionNotice
-            if (notice != null) {
-                Text(notice, modifier = Modifier.testTag("partner-suppressed"))
-            } else {
-                people.givenLabel?.let { Text("Given: $it", modifier = Modifier.testTag("partner-given")) }
-            }
-        }
-    }
-
-    // Spend totals (P-12).
-    if (snapshot.spend.isNotEmpty()) {
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("Spend", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
-            snapshot.spend.forEach { Text("${it.category}: ${it.amountLabel}", style = MaterialTheme.typography.bodySmall) }
-        }
-    }
-
-    // Users — admin can invite/remove inline; a viewer sees the list read-only (§7.2).
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("Team", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
-        var confirmingRemoval by rememberSaveable { mutableStateOf<String?>(null) }
-        snapshot.users.forEach { user ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val isSelf = user.id == snapshot.selfId
-                Text("${user.name}${if (isSelf) " (you)" else ""} · ${user.role}", modifier = Modifier.weight(1f))
-                if (model.canRemove(user)) {
-                    if (confirmingRemoval == user.id) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = { model.removeUser(user.id); confirmingRemoval = null },
-                                modifier = Modifier.testTag("partner-remove-confirm-${user.id}")
-                                    .semantics { contentDescription = "Confirm remove ${user.name}" },
-                            ) { Text("Yes, remove") }
-                            Button(
-                                onClick = { confirmingRemoval = null },
-                                modifier = Modifier.testTag("partner-remove-keep-${user.id}"),
-                            ) { Text("Keep") }
-                        }
-                    } else {
-                        Button(
-                            onClick = { confirmingRemoval = user.id },
-                            modifier = Modifier.testTag("partner-remove-${user.id}")
-                                .semantics { contentDescription = "Remove ${user.name}" },
-                        ) { Text("Remove") }
-                    }
-                }
-            }
-        }
-        if (model.role.canManageUsers) {
-            var inviteEmail by rememberSaveable { mutableStateOf("") }
-            OutlinedTextField(
-                value = inviteEmail, onValueChange = { inviteEmail = it },
-                label = { Text("Invite a viewer by email") }, singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                modifier = Modifier.fillMaxWidth().testTag("partner-invite-email"),
-            )
-            Button(
-                onClick = { model.inviteUser(inviteEmail.trim(), PartnerRole.VIEWER); inviteEmail = "" },
-                enabled = isPlausibleEmail(inviteEmail),
-                modifier = Modifier.testTag("partner-invite"),
-            ) { Text("Invite user") }
-        } else {
-            Text("Read-only access", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("partner-readonly"))
-        }
-    }
-}

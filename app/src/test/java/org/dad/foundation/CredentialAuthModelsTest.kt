@@ -282,7 +282,7 @@ class CredentialAuthModelsTest {
 
     // MARK: pasted link
 
-    private val router = LinkRouter("https://dad.example", """{"account_paths":["/account/dashboard"],"proof_paths":["/account/claim","/account/email-change"],"claim_return_paths":["/account/dashboard"],"notification_paths":[]}""")
+    private val router = LinkRouter("https://dad.example", """{"account_paths":["/account/dashboard"],"proof_paths":["/account/claim","/account/email-change"],"partner_proof_paths":["/partner/accept"],"claim_return_paths":["/account/dashboard"],"notification_paths":[]}""")
     private val token = "A".repeat(43)
 
     @Test fun onlyADadClaimLinkIsAcceptedFromAPaste() {

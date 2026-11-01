@@ -107,6 +107,9 @@ class FoundationTest {
         val token = "a".repeat(32)
         assertEquals(LinkIntent.Claim(token, AccountDestination.DASHBOARD), router.route("https://public.test/account/claim#token=$token&next=/account/dashboard"))
         listOf("https://evil.test/account/dashboard", "http://public.test/account/profile", "https://user@public.test/account/profile", "https://public.test/account%2fclaim#token=$token", "https://public.test/account/claim#token=$token&next=https://evil.test", "https://public.test/account/claim#token=$token&token=$token").forEach { assertNull(it, router.route(it)) }
+        assertEquals(LinkIntent.PartnerSignIn(token), router.route("https://public.test/partner/accept#token=$token"))
+        listOf("https://public.test/partner/accept#token=$token&next=/account/dashboard", "https://public.test/partner/accept?x=1#token=$token",
+            "https://public.test/partner/accept#token=short").forEach { assertNull(it, router.route(it)) }
         assertEquals(AccountDestination.PAYMENT_METHOD, router.notification("/account/payment-method"))
         assertEquals(AccountDestination.GIFTS, router.notification("/account/gifts"))
         assertNull(router.notification("https://public.test/account/dashboard"))

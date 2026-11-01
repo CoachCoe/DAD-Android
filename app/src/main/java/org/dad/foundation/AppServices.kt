@@ -22,6 +22,9 @@ class AuthServices(
     val external: ExternalSignInDeps,
 )
 
+/** The partner journey: its own 12-hour session, the emailed-link sign-in and the portal. */
+class PartnerKit(val session: PartnerSession, val signIn: PartnerSignInService, val service: PartnerService)
+
 /** What the composition root hands the UI: the session plus the real (or, in DEBUG only, preview) services on it. */
 class AppServices(
     val session: AccountSession,
@@ -38,6 +41,7 @@ class AppServices(
     val engagement: EngagementService? = null,
     val management: AccountManagementService? = null,
     val wallet: WalletPassService? = null,
+    val partner: PartnerKit? = null,
 )
 
 /** DEBUG launch switches. Always all-false in a release build. */
@@ -60,6 +64,8 @@ data class LaunchOptions(
     val stubEngagement: StubEngagementScenario = StubEngagementScenario.STANDARD,
     /** Stub backend only (screenshot and UI-test aid): open the engagement screen straight from the donor home. */
     val stubOpenEngagement: Boolean = false,
+    /** Stub backend only: start with a stored partner session so the portal opens at once. */
+    val stubPartnerSignedIn: Boolean = false,
 )
 
 /** What the DEBUG stub backend answers for the donor-home reads. */

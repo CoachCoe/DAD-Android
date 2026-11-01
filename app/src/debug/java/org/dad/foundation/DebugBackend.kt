@@ -26,6 +26,8 @@ import okio.Buffer
  * Profile/preferences/logout/refresh behave like a live account; account deletion succeeds (200)
  * unless `stub_delete_blocked` (409), after which the account is gone (profile -> 401).
  * Contact details, email change, sessions, the employer link and the Wallet pass are scripted by [StubAccount].
+ * The partner sign-in link and portal are scripted by [StubPartner]; `stub_partner_signed_in` starts with a stored
+ * partner session.
  * Events (`/donor/me/events`) are scripted by [StubEvents] (`stub_events_invited`, `stub_events_fail_first`, `stub_events_not_eligible`).
  * `stub_signed_in` starts with a stored session. The donor-home reads follow the scenario extras
  * (`stub_dashboard_empty`, `stub_dashboard_fail_first`, `stub_dashboard_unranked`); see [StubDonorHome].
@@ -63,6 +65,9 @@ object DebugBackend {
             engagement = WireEngagement(ProductClient(ORIGIN, session, http)),
             management = WireAccountManagement(ProductClient(ORIGIN, session, http)),
             wallet = WireWalletPass(ProductClient(ORIGIN, session, http)),
+            partner = PartnerSession(InMemoryCredentialStore(
+                if (options.stubPartnerSignedIn) Credentials("stub-partner-0", "", Long.MAX_VALUE) else null,
+            )).let { PartnerKit(it, WirePartnerAuth(ORIGIN, it, http), WirePartner(ORIGIN, it, http)) },
         )
     }
 }
@@ -79,6 +84,7 @@ private class StubInterceptor(private val deletionBlocked: Boolean, scenario: St
     private val events = StubEvents(eventsScenario)
     private val engagement = StubEngagement(engagementScenario)
     private val account = StubAccount()
+    private val partner = StubPartner()
     private var generation = 0
     private var deleted = false
     private var version = 3
@@ -111,6 +117,11 @@ private class StubInterceptor(private val deletionBlocked: Boolean, scenario: St
         val authorized = request.header("Authorization")?.startsWith("Bearer stub-access-") == true
         fun reply(code: Int, json: String = "{}") = Response.Builder().request(request).protocol(Protocol.HTTP_1_1)
             .code(code).message("stub").body(json.toResponseBody("application/json".toMediaType())).build()
+        if (partner.handles(request.url.encodedPath)) {
+            val answer = partner.answer(request.method, request.url.encodedPath, payload, request.header("Authorization"))
+            return Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(answer.code).message("stub")
+                .body(answer.body.toResponseBody(answer.type.toMediaType())).build()
+        }
         return when (request.method to request.url.encodedPath) {
             "POST" to "/donor/phone/sign-in/options" -> reply(200, """{"sent":true}""")
             "POST" to "/donor/phone/sign-in" -> when {
