@@ -42,6 +42,11 @@ class AppServices(
     val management: AccountManagementService? = null,
     val wallet: WalletPassService? = null,
     val partner: PartnerKit? = null,
+    /** Opt-in usage analytics; null where nothing is ever sent (the synthetic preview). */
+    val analytics: AnalyticsUploader? = null,
+    val push: PushRegistration? = null,
+    /** Null until a push provider is linked; then the donor and partner register at every launch. */
+    val pushTokens: PushTokenProvider? = null,
 )
 
 /** DEBUG launch switches. Always all-false in a release build. */
@@ -66,6 +71,10 @@ data class LaunchOptions(
     val stubOpenEngagement: Boolean = false,
     /** Stub backend only: start with a stored partner session so the portal opens at once. */
     val stubPartnerSignedIn: Boolean = false,
+    /** Stub backend only: the analytics question has not been answered yet (otherwise it starts declined). */
+    val stubAnalyticsUnset: Boolean = false,
+    /** Stub backend only: a push provider is linked, so the donor registers a token. */
+    val stubPush: Boolean = false,
 )
 
 /** What the DEBUG stub backend answers for the donor-home reads. */

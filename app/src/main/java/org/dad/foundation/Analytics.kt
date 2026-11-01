@@ -35,11 +35,33 @@ sealed interface AnalyticsEvent {
         override val properties = emptyMap<String, String>()
     }
 
+    /** A tapped notification; `type` is its server `category` (`REFERRAL_CONVERTED`, `STREAK_AT_RISK`, ...). */
+    data class PushOpened(val type: String) : AnalyticsEvent {
+        override val name = "push_opened"
+        override val properties = mapOf("type" to type)
+    }
+
+    /** One of the §9 events that carry no properties. */
+    data class Plain(val event: PlainEvent) : AnalyticsEvent {
+        override val name = event.wire
+        override val properties = emptyMap<String, String>()
+    }
+
     /** R-3/R-4: a referral converted (first completed gift by a referred donor). Takes no properties. */
     data object ReferralConverted : AnalyticsEvent {
         override val name = "referral_converted"
         override val properties = emptyMap<String, String>()
     }
+}
+
+/** The §9 events without properties that the app emits, by their ingest names. */
+enum class PlainEvent(val wire: String) {
+    APP_OPENED("app_opened"), ROLE_SELECTED("role_selected"),
+    SIGNUP_STARTED("signup_started"), SIGNUP_COMPLETED("signup_completed"),
+    GIFT_STARTED("gift_started"), AMOUNT_CHANGED("amount_changed"), GIFT_CANCELLED("gift_cancelled"), ACCOUNT_DELETED("account_deleted"),
+    RANKINGS_TOGGLED("rankings_toggled"), VOLUNTEER_OPTED_IN("volunteer_opted_in"),
+    EVENT_VIEWED("event_viewed"), EVENT_RESERVED("event_reserved"), EVENT_WAITLISTED("event_waitlisted"), EVENT_CHECKED_IN("event_checked_in"),
+    TEAM_JOINED("team_joined"), PARTNER_REPORT_EXPORTED("partner_report_exported"),
 }
 
 /** The closed `source` set the ingest endpoint accepts for `attribution_captured` (case-sensitive). */

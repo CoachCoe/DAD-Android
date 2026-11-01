@@ -140,4 +140,26 @@ class StubBackendFlowTest {
             waitFor("partner-invite")
         }
     }
+
+    @Test fun theAnalyticsQuestionIsAskedOnceAndAnsweringYesSendsAnEvent() {
+        DebugBackend.resetRequestLog()
+        launch("stub_analytics_unset").use {
+            waitFor("analytics-choice")
+            compose.tapSafely("analytics-allow")
+            compose.waitUntil(15_000) { compose.onAllNodes(hasTestTag("analytics-choice")).fetchSemanticsNodes().isEmpty() }
+            compose.waitUntil(15_000) { "POST /analytics/events" in DebugBackend.requestLog }
+        }
+    }
+
+    @Test fun aTappedNotificationOpensItsScreenAndTheTokenIsRegistered() {
+        DebugBackend.resetRequestLog()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val intent = Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            .putExtra("stub_backend", true).putExtra("stub_signed_in", true).putExtra("stub_push", true)
+            .putExtra("category", "STREAK_AT_RISK").putExtra("path", "/account/gifts")
+        ActivityScenario.launch<MainActivity>(intent).use {
+            waitFor("history-screen")
+            compose.waitUntil(15_000) { "POST /donor/me/push-device" in DebugBackend.requestLog }
+        }
+    }
 }

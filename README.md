@@ -92,12 +92,9 @@ its one-use proof. Notifications admit only approved relative paths.
 Production app links require the signing certificate's SHA-256 in a matching
 DAD-Main `assetlinks.json`, plus an HTTPS VIEW intent filter with the verified
 host. The release build ships application ID `org.dad.foundation`; the debug
-build uses `org.dad.foundation.debug` so both install side by side. Camera, push, and
-Wallet ports are defined; provider configuration, permission timing, final screens, and
-real-device acceptance follow the PRD. Phone, email signup and
-password sign-in are wired (see below). No permission is requested on
-startup, analytics are not enabled, and no staging/production service is contacted by
-the synthetic preview.
+build uses `org.dad.foundation.debug` so both install side by side. Phone, email signup and
+password sign-in are wired (see below). No permission is requested on startup, and no
+staging/production service is contacted by the synthetic preview.
 
 ## Sign-in methods (Phase 1b, contract 2.4.0)
 
@@ -243,3 +240,26 @@ others after confirmation; viewers are read-only), and lets admins export a PDF 
 retained one (an aged-out report is a 404, "no longer available"). Reports are shared through the FileProvider and
 capped at 16 MiB. The `stub_backend` transport serves the same routes (`stub_partner_signed_in` starts with a stored
 partner session; links whose token starts `goodpartner` are accepted).
+
+## Analytics and push (contract 2.9.0)
+
+**Analytics are opt-in**, worded and counted as on the website. The start screen asks once ("Allow usage
+analytics?") and Settings has a "Usage analytics" switch; until the donor allows it nothing is recorded. Events go
+only to DAD-Main's `ingestAnalytics` (first party, `X-DAD-Platform: ANDROID`, attributed to the donor when signed
+in) in batches of up to 100 with a stable id each, so a retried batch is not double-counted; declining drops
+anything still buffered. The app emits `app_opened`, `role_selected`, `invite_shared` (`share_sheet` / `copy`),
+`irl_code_shown` and `push_opened`; every other event is derived from the successful API call it stands for by
+the same rules as the website's `observeAPI` (`AnalyticsObserver`), e.g. `signup_started` for `POST /donor/signup`.
+Declare this in the Play Data safety form as app interactions collected for analytics, optional, not shared.
+
+**Push** registers the donor (`registerPushDevice`, at every launch and sign-in; the server drops the token when the
+session ends) and the partner (`partnerRegisterPushDevice`, unregistered on sign-out). A tapped notification's
+`category` is counted as `push_opened` and its `path` opens the matching screen (`/account/gifts` gift history,
+`/account/payment-method` the gift screen, `/account/profile` Settings), after sign-in if need be. **Owner
+dependency:** no push provider is linked, so there is no token and nothing is registered. Turning push on needs a
+Firebase project for the app ID, its `google-services` configuration, the Firebase Messaging dependency (a
+dependency decision), an implementation of `PushTokenProvider`, the `POST_NOTIFICATIONS` runtime permission on
+Android 13+, and DAD-Main's FCM credentials. `stub_push` exercises the rest with a fixed token.
+
+**Referral attribution** is captured by the website (`/r/<code>`, `/c/<code>`). The mobile contract's signup has no
+attribution field, so the app keeps its capture seam (`AttributionCapture`) unused until DAD-Main adds one.

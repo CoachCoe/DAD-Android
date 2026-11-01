@@ -30,7 +30,7 @@ internal fun defaultNativeClient(): OkHttpClient = OkHttpClient.Builder()
 internal fun nativeRetrofit(url: HttpUrl, baseClient: OkHttpClient, access: String? = null, maxBodyBytes: Long = 1_048_576): Retrofit {
     val builder = baseClient.newBuilder().followRedirects(false).followSslRedirects(false).cookieJar(CookieJar.NO_COOKIES)
     builder.interceptors().add(0, Interceptor { chain ->
-        val request = chain.request().newBuilder().header("X-DAD-Client", "native").removeHeader("Origin").removeHeader("Cookie")
+        val request = chain.request().newBuilder().header("X-DAD-Client", "native").header("X-DAD-Platform", "ANDROID").removeHeader("Origin").removeHeader("Cookie")
         if (access != null) request.header("Authorization", "Bearer $access") else request.removeHeader("Authorization")
         val response = chain.proceed(request.build())
         val body = response.body

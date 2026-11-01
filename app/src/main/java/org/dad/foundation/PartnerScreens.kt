@@ -135,8 +135,9 @@ private enum class PartnerSection(val label: String) { OVERVIEW("Overview"), INI
 
 /** The signed-in partner portal. [publicOrigin] builds the company sign-up link; blank hides it. */
 @Composable
-fun PartnerPortal(model: PartnerModel, publicOrigin: String, onSignedOut: () -> Unit = {}) {
+fun PartnerPortal(model: PartnerModel, publicOrigin: String, onSignedOut: () -> Unit = {}, pushTokens: PushTokenProvider? = null) {
     LaunchedEffect(Unit) { model.load() }
+    LaunchedEffect(pushTokens) { runCatching { pushTokens?.token() }.getOrNull()?.let(model::registerPush) }
     LaunchedEffect(model.signedOut) { if (model.signedOut) onSignedOut() }
     PartnerReportShare(model)
     var section by rememberSaveable { mutableStateOf(PartnerSection.OVERVIEW) }

@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -52,6 +53,7 @@ fun UnauthenticatedStack(
     partnerToken: String? = null,
     onPartnerTokenConsumed: () -> Unit = {},
     onPartnerSignedIn: () -> Unit = {},
+    analytics: AnalyticsUploader? = null,
 ) {
     var step by rememberSaveable { mutableStateOf(AuthStep.RoleSelect) }
     LaunchedEffect(partnerToken) { if (partnerToken != null) step = AuthStep.Partner }
@@ -60,7 +62,10 @@ fun UnauthenticatedStack(
         else AuthStep.RoleSelect
     }
     when (step) {
-        AuthStep.RoleSelect -> RoleSelect(notice) { role -> step = if (role == AppRole.DONOR) AuthStep.Methods else AuthStep.Partner }
+        AuthStep.RoleSelect -> RoleSelect(notice, analytics) { role ->
+            analytics?.emit(AnalyticsEvent.Plain(PlainEvent.ROLE_SELECTED))
+            step = if (role == AppRole.DONOR) AuthStep.Methods else AuthStep.Partner
+        }
         AuthStep.Methods -> SignInMethods(
             auth.external, establish, generation, onSignedIn,
             onPhone = { step = AuthStep.Phone }, onEmailLink = { step = AuthStep.EmailLink }, onPassword = { step = AuthStep.Password },
@@ -97,7 +102,7 @@ internal fun AuthColumn(tag: String, content: @Composable () -> Unit) {
 /** Unauthenticated splash: pick a journey before signing in. Shows [notice] (a failed link, a revoked
  *  session, or an unconfigured build) so the reason for being here is never silent. */
 @Composable
-fun RoleSelect(notice: String?, onSelect: (AppRole) -> Unit) {
+fun RoleSelect(notice: String?, analytics: AnalyticsUploader? = null, onSelect: (AppRole) -> Unit) {
     AuthColumn("role-select") {
         Text("DAD", style = MaterialTheme.typography.displayMedium, modifier = Modifier.dadHeading())
         Spacer(Modifier.height(16.dp))
@@ -111,8 +116,26 @@ fun RoleSelect(notice: String?, onSelect: (AppRole) -> Unit) {
         DadPrimaryButton("I’m a donor", Modifier.testTag("role-donor")) { onSelect(AppRole.DONOR) }
         Spacer(Modifier.height(12.dp))
         DadPrimaryButton("I’m a partner", Modifier.testTag("role-partner")) { onSelect(AppRole.PARTNER) }
+        if (analytics != null && analytics.choice == null) {
+            Spacer(Modifier.height(28.dp))
+            AnalyticsChoice(analytics)
+        }
     }
 }
+
+/** The first-launch analytics question, worded as on the website; the answer can be changed in Settings. */
+@Composable
+private fun AnalyticsChoice(analytics: AnalyticsUploader) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.testTag("analytics-choice")) {
+        Text(ANALYTICS_EXPLAINER, style = MaterialTheme.typography.bodySmall)
+        OutlinedButton(onClick = { analytics.choose(true) }, modifier = Modifier.fillMaxWidth().testTag("analytics-allow")) { Text("Allow usage analytics") }
+        OutlinedButton(onClick = { analytics.choose(false) }, modifier = Modifier.fillMaxWidth().testTag("analytics-decline")) { Text("Decline usage analytics") }
+    }
+}
+
+internal const val ANALYTICS_EXPLAINER = "Allow first-party usage analytics? DAD uses a temporary journey ID to measure signup, sharing and " +
+    "giving. No names, email addresses or payment details are sent. Observations are kept for 13 months. You can change this " +
+    "choice in Settings."
 
 @Composable
 private fun SignInMethods(

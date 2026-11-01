@@ -100,7 +100,7 @@ fun EngagementHome(
                 Column(Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
                     model.actionError?.let { Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("engagement-action-error")) }
                 }
-                model.snapshot?.let { Content(model, it, publicOrigin, sharer, wallet, onShowQr = { showQr = true }) }
+                model.snapshot?.let { Content(model, it, publicOrigin, sharer, wallet, onShowQr = { showQr = true; sharer.codeShown() }) }
             }
         }
     }

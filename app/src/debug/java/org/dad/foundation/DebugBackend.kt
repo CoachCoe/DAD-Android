@@ -28,6 +28,8 @@ import okio.Buffer
  * Contact details, email change, sessions, the employer link and the Wallet pass are scripted by [StubAccount].
  * The partner sign-in link and portal are scripted by [StubPartner]; `stub_partner_signed_in` starts with a stored
  * partner session.
+ * `/analytics/events` accepts every batch; the analytics question starts answered "no" unless `stub_analytics_unset`.
+ * `stub_push` links a push provider with a fixed token, which `/donor/me/push-device` accepts.
  * Events (`/donor/me/events`) are scripted by [StubEvents] (`stub_events_invited`, `stub_events_fail_first`, `stub_events_not_eligible`).
  * `stub_signed_in` starts with a stored session. The donor-home reads follow the scenario extras
  * (`stub_dashboard_empty`, `stub_dashboard_fail_first`, `stub_dashboard_unranked`); see [StubDonorHome].
@@ -38,13 +40,18 @@ object DebugBackend {
     fun resetRequestLog() = requestLog.clear()
 
     const val ORIGIN = "https://stub.invalid"
+    const val STUB_PUSH_TOKEN = "stub-fcm-registration-token-0123456789"
     /** The public (link) origin the stub accepts claim links for, so a pasted sign-in link routes in UI tests. */
     const val PUBLIC_ORIGIN = ORIGIN
 
     fun stub(context: Context, scope: CoroutineScope, options: LaunchOptions): AppServices? {
         if (!options.stubBackend) return null
         val interceptor = StubInterceptor(options.stubDeleteBlocked, options.stubDashboard, options.stubGift, options.stubEvents, options.stubEngagement)
-        val http = OkHttpClient.Builder().addInterceptor(interceptor).build()
+        val analytics = AnalyticsUploader(
+            MemoryAnalyticsConsent(choice = if (options.stubAnalyticsUnset) null else false),
+            WireAnalytics(ORIGIN, access = { null }, OkHttpClient.Builder().addInterceptor(interceptor).build()), scope,
+        )
+        val http = OkHttpClient.Builder().addInterceptor(AnalyticsObserver(analytics)).addInterceptor(interceptor).build()
         val store = InMemoryCredentialStore(
             if (options.stubSignedIn) Credentials("stub-access-0", "stub-refresh-0-xxxxxxxxxxxxxxxxxxxxxxxxxxxx", Long.MAX_VALUE) else null,
         )
@@ -68,6 +75,9 @@ object DebugBackend {
             partner = PartnerSession(InMemoryCredentialStore(
                 if (options.stubPartnerSignedIn) Credentials("stub-partner-0", "", Long.MAX_VALUE) else null,
             )).let { PartnerKit(it, WirePartnerAuth(ORIGIN, it, http), WirePartner(ORIGIN, it, http)) },
+            analytics = analytics,
+            push = WireDonorPush(ProductClient(ORIGIN, session, http)),
+            pushTokens = if (options.stubPush) PushTokenProvider { STUB_PUSH_TOKEN } else null,
         )
     }
 }
@@ -123,6 +133,8 @@ private class StubInterceptor(private val deletionBlocked: Boolean, scenario: St
                 .body(answer.body.toResponseBody(answer.type.toMediaType())).build()
         }
         return when (request.method to request.url.encodedPath) {
+            "POST" to "/donor/me/push-device" -> if (authorized) reply(200, """{"registered":true,"platform":"ANDROID","environment":null}""") else reply(401)
+            "POST" to "/analytics/events" -> reply(200, """{"accepted":${Regex("\"name\"").findAll(payload).count()}}""")
             "POST" to "/donor/phone/sign-in/options" -> reply(200, """{"sent":true}""")
             "POST" to "/donor/phone/sign-in" -> when {
                 payload.contains("\"123456\"") -> reply(200, session())

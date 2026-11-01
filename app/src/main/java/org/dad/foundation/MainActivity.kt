@@ -159,6 +159,14 @@ class AccountModel(
         private set
     var partner: PartnerKit? by mutableStateOf(null)
         private set
+    var analytics: AnalyticsUploader? by mutableStateOf(null)
+        private set
+    var pushTokens: PushTokenProvider? by mutableStateOf(null)
+        private set
+    /** A screen a tapped notification or link asked for, opened by the donor shell once signed in. */
+    var destination: AccountDestination? by mutableStateOf(null)
+        private set
+    private var pushRegistered = false
     /** A partner session is in use (and no donor one): the root shows the partner portal. */
     var partnerSignedIn: Boolean by mutableStateOf(false)
         private set
@@ -186,7 +194,7 @@ class AccountModel(
             withContext(io) { factory(CoroutineScope(viewModelScope.coroutineContext + io), options) }
                 .also {
                     services = it; signIn = it.signIn; settings = it.settings; passwordSettings = it.passwordSettings; dashboard = it.dashboard; giving = it.giving; events = it.events; engagement = it.engagement
-                    management = it.management; wallet = it.wallet; partner = it.partner
+                    management = it.management; wallet = it.wallet; partner = it.partner; analytics = it.analytics; pushTokens = it.pushTokens
                     auth = AuthServices(it.signIn, it.signup, it.signInLink, it.passwordSignIn, it.external)
                 }
         } catch (cancelled: CancellationException) { throw cancelled }
@@ -207,6 +215,8 @@ class AccountModel(
             // Without a donor session, a partner session still within its 12 hours reopens the portal.
             partnerSignedIn = !hasSession && active?.partner?.session?.isSignedIn == true
             booted = true
+            active?.analytics?.emit(AnalyticsEvent.Plain(PlainEvent.APP_OPENED))
+            if (hasSession) gate.signedIn()?.let { destination = it }
             if (hasSession) load() else state = if (active == null) AccountState.Unavailable else AccountState.SignedOut
         }
     }
@@ -214,7 +224,8 @@ class AccountModel(
     /** A sign-in completed (the session already holds the credentials): enter the donor shell. */
     fun onSignedIn() {
         notice = null
-        gate.signedIn()
+        gate.signedIn()?.let { destination = it }
+        pushRegistered = false
         generation++
         hasSession = true
         load()
@@ -223,6 +234,8 @@ class AccountModel(
     /** Sign-out, account deletion or a revoked session: back to sign-in. */
     fun onSignedOut(message: String? = null) {
         notice = message
+        pushRegistered = false
+        destination = null
         generation++
         hasSession = false
         state = AccountState.SignedOut
@@ -245,6 +258,7 @@ class AccountModel(
                 notice = null
                 hasSession = true
                 state = AccountState.Ready(profile)
+                registerPush(active)
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: AccountFailure.SignedOut) {
                 // Revoked or expired for good: the session cleared itself, so return to sign-in.
@@ -272,6 +286,28 @@ class AccountModel(
         partnerSignedIn = true
     }
 
+    /** Best-effort, once per sign-in and launch: platforms rotate tokens, so the server wants every launch. */
+    private fun registerPush(active: AppServices) {
+        val push = active.push ?: return
+        val tokens = active.pushTokens ?: return
+        if (pushRegistered) return
+        pushRegistered = true
+        viewModelScope.launch(io) {
+            try { tokens.token()?.let { push.register(it) } }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { pushRegistered = false }
+        }
+    }
+
+    /** A tapped notification: counted (`push_opened`), then its screen is opened, after sign-in if need be. */
+    fun openNotification(tap: PushTap, router: LinkRouter?) {
+        analytics?.emit(AnalyticsEvent.PushOpened(tap.category))
+        val target = tap.path?.let { router?.notification(it) } ?: return
+        gate.receive(target, hasSession)?.let { destination = it }
+    }
+
+    fun destinationOpened() { destination = null }
+
     fun onPartnerSignedOut() {
         generation++
         partnerSignedIn = false
@@ -283,7 +319,7 @@ class AccountModel(
     fun receive(value: String, router: LinkRouter): String? {
         return when (val intent = router.route(value)) {
             is LinkIntent.Account -> if (intent.destination == AccountDestination.PROFILE) {
-                gate.receive(intent.destination, state is AccountState.Ready)
+                gate.receive(intent.destination, state is AccountState.Ready)?.let { destination = it }
                 if (hasSession) load()
                 null
             } else value
@@ -318,6 +354,8 @@ private fun tokenColor(name: String) = Color(DADTokens.color.getValue(name).toCo
 class MainActivity : ComponentActivity() {
     private var incomingLink: String? = null
     private var linkEvent by mutableIntStateOf(0)
+    private var incomingTap: PushTap? = null
+    private var tapEvent by mutableIntStateOf(0)
     /** The configured public origin invite links are built from; blank means none (no link is ever invented). */
     private val linkPublicOrigin by lazy {
         BuildConfig.DAD_PUBLIC_ORIGIN.ifBlank { if (BuildConfig.DEBUG && intent.getBooleanExtra("stub_backend", false)) DebugBackend.PUBLIC_ORIGIN else "" }
@@ -331,6 +369,8 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         incomingLink = intent.dataString
         linkEvent++
+        incomingTap = PushTap.from(intent.getStringExtra("category"), intent.getStringExtra("path"))
+        tapEvent++
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -374,6 +414,8 @@ class MainActivity : ComponentActivity() {
             },
             stubOpenEngagement = BuildConfig.DEBUG && intent.getBooleanExtra("stub_open_engagement", false),
             stubPartnerSignedIn = BuildConfig.DEBUG && intent.getBooleanExtra("stub_partner_signed_in", false),
+            stubAnalyticsUnset = BuildConfig.DEBUG && intent.getBooleanExtra("stub_analytics_unset", false),
+            stubPush = BuildConfig.DEBUG && intent.getBooleanExtra("stub_push", false),
         )
         val giving = BuildConfig.DEBUG && intent.getBooleanExtra("preview_giving", false)
         val impact = BuildConfig.DEBUG && (intent.getBooleanExtra("preview_impact", false) || intent.getBooleanExtra("preview_network", false))
@@ -383,6 +425,7 @@ class MainActivity : ComponentActivity() {
         val partnerViewer = BuildConfig.DEBUG && intent.getBooleanExtra("preview_partner_viewer", false)
         val appContext = applicationContext
         incomingLink = intent.dataString
+        incomingTap = PushTap.from(intent.getStringExtra("category"), intent.getStringExtra("path"))
         val factory = viewModelFactory {
             initializer {
                 AccountModel(factory = factory@{ scope, options ->
@@ -398,27 +441,33 @@ class MainActivity : ComponentActivity() {
                         AppServices(session, PreviewSignIn(), PreviewSessionSettings(session),
                             partner = PartnerKit(PartnerSession(PreviewStore(signedIn = false)), PreviewPartnerSignIn, PreviewPartnerService()))
                     } else {
-                        val session = AccountSession(WireAPI(BuildConfig.DAD_API_ORIGIN), KeystoreCredentialStore(appContext), scope)
+                        val origin = BuildConfig.DAD_API_ORIGIN
+                        lateinit var session: AccountSession
+                        val analytics = AnalyticsUploader(PrefsAnalyticsConsent(appContext), WireAnalytics(origin, access = { session.accessToken() }), scope)
+                        val http = defaultNativeClient().newBuilder().addInterceptor(AnalyticsObserver(analytics)).build()
+                        session = AccountSession(WireAPI(origin, http), KeystoreCredentialStore(appContext), scope)
                         val attribution = PrefsAttributionStore(appContext)
-                        val credentialAuth = WireCredentialAuth(BuildConfig.DAD_API_ORIGIN, android.os.Build.MODEL)
-                        val external = WireExternalSignIn(BuildConfig.DAD_API_ORIGIN, android.os.Build.MODEL)
+                        val credentialAuth = WireCredentialAuth(origin, android.os.Build.MODEL, http)
+                        val external = WireExternalSignIn(origin, android.os.Build.MODEL, http)
                         AppServices(
                             session,
-                            WireAuth(BuildConfig.DAD_API_ORIGIN, android.os.Build.MODEL),
-                            WireSettings(ProductClient(BuildConfig.DAD_API_ORIGIN, session), onLocalWipe = { attribution.clear() }),
+                            WireAuth(origin, android.os.Build.MODEL, http),
+                            WireSettings(ProductClient(origin, session, http), onLocalWipe = { attribution.clear() }),
                             signup = credentialAuth,
                             signInLink = credentialAuth,
                             passwordSignIn = credentialAuth,
-                            passwordSettings = WirePasswordSettings(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
-                            dashboard = WireDashboard(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
-                            giving = GivingKit(WireGiving(ProductClient(BuildConfig.DAD_API_ORIGIN, session))),
-                            events = WireEvents(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
-                            engagement = WireEngagement(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
-                            management = WireAccountManagement(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
-                            wallet = WireWalletPass(ProductClient(BuildConfig.DAD_API_ORIGIN, session)),
+                            passwordSettings = WirePasswordSettings(ProductClient(origin, session, http)),
+                            dashboard = WireDashboard(ProductClient(origin, session, http)),
+                            giving = GivingKit(WireGiving(ProductClient(origin, session, http))),
+                            events = WireEvents(ProductClient(origin, session, http)),
+                            engagement = WireEngagement(ProductClient(origin, session, http)),
+                            management = WireAccountManagement(ProductClient(origin, session, http)),
+                            wallet = WireWalletPass(ProductClient(origin, session, http)),
                             partner = PartnerSession(KeystoreCredentialStore(appContext, "partner-session", refreshable = false)).let {
-                                PartnerKit(it, WirePartnerAuth(BuildConfig.DAD_API_ORIGIN, it), WirePartner(BuildConfig.DAD_API_ORIGIN, it))
+                                PartnerKit(it, WirePartnerAuth(origin, it, http), WirePartner(origin, it, http))
                             },
+                            analytics = analytics,
+                            push = WireDonorPush(ProductClient(origin, session, http)),
                             external = ExternalSignInDeps(
                                 // No Credential Manager provider is linked, so a configured ID alone never switches a method on.
                                 capabilities = SignInCapabilities.of(SignInConfig(BuildConfig.DAD_GOOGLE_WEB_CLIENT_ID, BuildConfig.DAD_PASSKEY_RP_ID)),
@@ -443,6 +492,10 @@ class MainActivity : ComponentActivity() {
                         catch (_: android.content.ActivityNotFoundException) { model.configurationUnavailable() }
                     }
                 }
+            }
+            LaunchedEffect(tapEvent) {
+                incomingTap?.let { model.openNotification(it, linkRouter) }
+                incomingTap = null
             }
             val dark = isSystemInDarkTheme()
             val primary = DadTheme.brandAccent(dark)
@@ -472,6 +525,7 @@ class MainActivity : ComponentActivity() {
                                 viewModel(key = "partner-${model.generation}", factory = PartnerModel.factory(partnerKit.service)),
                                 publicOrigin = linkPublicOrigin,
                                 onSignedOut = { model.onPartnerSignedOut() },
+                                pushTokens = model.pushTokens,
                             )
                         is RoleRouter.Root.Restoring, is RoleRouter.Root.Authenticated ->
                             if (partnerViewer) {
@@ -507,6 +561,7 @@ class MainActivity : ComponentActivity() {
                             partnerToken = model.pendingPartnerToken,
                             onPartnerTokenConsumed = { model.partnerTokenConsumed() },
                             onPartnerSignedIn = { model.onPartnerSignedIn() },
+                            analytics = model.analytics,
                         )
                     }
                 }
@@ -544,6 +599,17 @@ private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaun
     // Screens swap in and out of this one slot; the holder keeps each one's remembered state (the half-typed
     // delete confirmation in Settings) while another screen is on top.
     val holder = rememberSaveableStateHolder()
+    val ready = model.state is AccountState.Ready
+    LaunchedEffect(model.destination, ready) {
+        if (!ready) return@LaunchedEffect
+        when (model.destination ?: return@LaunchedEffect) {
+            AccountDestination.GIFTS -> inHistory = dashboard != null
+            AccountDestination.PAYMENT_METHOD -> inGift = giving != null
+            AccountDestination.PROFILE -> inSettings = service != null
+            AccountDestination.DASHBOARD -> Unit
+        }
+        model.destinationOpened()
+    }
     if (inGift && giving != null) {
         BackHandler { inGift = false }
         holder.SaveableStateProvider("gift") {
@@ -565,7 +631,7 @@ private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaun
             EngagementHome(
                 viewModel(key = "engagement-${model.generation}", factory = EngagementModel.factory(engagementService)),
                 publicOrigin = publicOrigin,
-                sharer = remember { ReferralShareAction(AndroidReferralSharer(context)) },
+                sharer = remember { ReferralShareAction(AndroidReferralSharer(context), model.analytics) },
                 onClose = { inEngagement = false },
                 onSignedOut = { inEngagement = false; model.onSignedOut() },
                 wallet = model.wallet?.let { viewModel<WalletPassModel>(key = "wallet-${model.generation}", factory = WalletPassModel.factory(it)) },
@@ -602,6 +668,7 @@ private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaun
                 onCancelGift = if (giving != null) ({ inGift = true }) else null,
                 management = model.management,
                 generation = model.generation,
+                analytics = model.analytics,
             )
         }
     } else {
@@ -668,6 +735,7 @@ private fun DonorLanding(model: AccountModel, onSettings: (() -> Unit)? = null, 
 private fun SettingsHome(
     model: SettingsModel, onBack: (() -> Unit)? = null, onSignedOut: (() -> Unit)? = null, password: PasswordChangeModel? = null,
     onCancelGift: (() -> Unit)? = null, management: AccountManagementService? = null, generation: Int = 0,
+    analytics: AnalyticsUploader? = null,
 ) {
     LaunchedEffect(Unit) { model.load() }
     LaunchedEffect(model.signedOut) { if (model.signedOut) onSignedOut?.invoke() }
@@ -700,7 +768,8 @@ private fun SettingsHome(
             is SettingsPhase.Ready -> model.snapshot?.let { snapshot ->
                 SettingsContent(model, snapshot, confirmingDelete, deleteTyped,
                     onConfirmingChange = { confirmingDelete = it }, onTypedChange = { deleteTyped = it }, password = password,
-                    onCancelGift = onCancelGift, management = management, generation = generation, onSignedOut = onSignedOut)
+                    onCancelGift = onCancelGift, management = management, generation = generation, onSignedOut = onSignedOut,
+                    analytics = analytics)
             }
         }
         model.actionError?.let { Text(it, modifier = Modifier.testTag("settings-action-error")) }
@@ -712,6 +781,7 @@ private fun SettingsContent(
     model: SettingsModel, snapshot: SettingsSnapshot, confirmingDelete: Boolean, deleteTyped: String,
     onConfirmingChange: (Boolean) -> Unit, onTypedChange: (String) -> Unit, password: PasswordChangeModel? = null,
     onCancelGift: (() -> Unit)? = null, management: AccountManagementService? = null, generation: Int = 0, onSignedOut: (() -> Unit)? = null,
+    analytics: AnalyticsUploader? = null,
 ) {
     // Profile header — role is immutable (D-1), ZIP drives streak day rollover.
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -739,6 +809,11 @@ private fun SettingsContent(
         }
         ToggleRow("Volunteer opt-in", snapshot.preferences.volunteer, "volunteer-toggle") {
             model.toggle("volunteer", it)
+        }
+        if (analytics != null) {
+            ToggleRow("Usage analytics", analytics.choice == true, "analytics-toggle") { analytics.choose(it) }
+            Text("First-party only: a temporary journey ID measures signup, sharing and giving. No names, email addresses or " +
+                "payment details are sent.", style = MaterialTheme.typography.bodySmall)
         }
     }
 
