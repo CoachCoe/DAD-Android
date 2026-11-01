@@ -79,25 +79,35 @@ class PartnerTest {
         var role: PartnerRole = PartnerRole.ADMIN,
         var pending: Boolean = false,
         var fail: Boolean = false,
+        var peopleError: Exception? = null,
+        var pushError: Exception? = null,
     ) : PartnerService {
         var invited = mutableListOf<Pair<String, PartnerRole>>()
         var removed = mutableListOf<String>()
         var pushRegistered = false
         var pushUnregistered = false
-        var users = mutableListOf(PartnerUser("u1", "a@x.com", "A", PartnerRole.ADMIN))
+        var users = mutableListOf(
+            PartnerUser("u1", "a@x.com", "A", PartnerRole.ADMIN),
+            PartnerUser("u2", "b@x.com", "B", PartnerRole.VIEWER),
+            PartnerUser("u3", "c@x.com", "C", PartnerRole.ADMIN),
+        )
+        var selfId: String? = "u1"
         override suspend fun overview(): PartnerOverview {
             if (pending) throw PartnerPendingApproval()
             if (fail) throw AccountFailure.SignedOut
             return PartnerOverview("Acme", "d", role, "AC", VerifiedMoney(1, true), VerifiedMoney(1, true),
-                1, VerifiedCount(1, true), 42, 120, 35, Date(), false)
+                1, VerifiedCount(1, true), 42, 120, 35, Date(), false, userId = selfId)
         }
         override suspend fun initiatives() = emptyList<PartnerInitiative>()
         override suspend fun spend() = emptyList<PartnerSpendCategory>()
-        override suspend fun people() = PartnerPeople(42, 120, 0, 0, 0, 0, 0, false)
+        override suspend fun people(): PartnerPeople {
+            peopleError?.let { throw it }
+            return PartnerPeople(42, 120, 0, 0, 0, 0, 0, false)
+        }
         override suspend fun users() = users
         override suspend fun inviteUser(email: String, role: PartnerRole) { invited.add(email to role) }
         override suspend fun removeUser(id: String) { removed.add(id); users.removeAll { it.id == id } }
-        override suspend fun registerPushDevice(token: String) { pushRegistered = true }
+        override suspend fun registerPushDevice(token: String) { pushError?.let { throw it }; pushRegistered = true }
         override suspend fun unregisterPushDevice() { pushUnregistered = true }
     }
 
@@ -147,5 +157,93 @@ class PartnerTest {
         model.unregisterPush(); dispatcher.scheduler.advanceUntilIdle()
         assertTrue(svc.pushRegistered)
         assertTrue(svc.pushUnregistered)
+    }
+
+    @Test fun endedSessionOnASecondaryReadFailsTheLoad() = runTest {
+        val model = PartnerModel(FakeService(peopleError = AccountFailure.SignedOut))
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(model.phase is PartnerPhase.Failed)
+    }
+
+    @Test fun otherSecondaryFailureHidesOnlyThatSection() = runTest {
+        val model = PartnerModel(FakeService(peopleError = AccountFailure.Unavailable))
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(PartnerPhase.Ready, model.phase)
+        assertNull(model.snapshot!!.people)
+        assertEquals("Acme", model.snapshot!!.overview.organization)
+    }
+
+    @Test fun failedPushRegistrationIsSilentAndDoesNotCrash() = runTest {
+        val svc = FakeService(pushError = AccountFailure.Unavailable)
+        val model = PartnerModel(svc)
+        model.registerPush("t"); dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(!svc.pushRegistered)
+        assertNull(model.actionError)
+    }
+
+    @Test fun emailShapeCheckAcceptsAddressesAndRejectsJunk() {
+        assertTrue(isPlausibleEmail(" ada@acme.com "))
+        assertTrue(!isPlausibleEmail(""))
+        assertTrue(!isPlausibleEmail("ada@acme"))
+        assertTrue(!isPlausibleEmail("ada acme@x.com"))
+        assertTrue(!isPlausibleEmail("a@@b.com"))
+        assertTrue(!isPlausibleEmail("a@b..c"))
+        assertTrue(!isPlausibleEmail("a@.b.c"))
+        assertTrue(!isPlausibleEmail("a@b.c."))
+        assertTrue(!isPlausibleEmail("@b.com"))
+        assertTrue(isPlausibleEmail("a@b.co.uk"))
+        assertTrue(!isPlausibleEmail("a".repeat(250) + "@b.com")) // > 254 chars
+    }
+
+    @Test fun inviteWithAMalformedEmailNeverReachesTheService() = runTest {
+        val svc = FakeService()
+        val model = PartnerModel(svc)
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        model.inviteUser("not-an-email", PartnerRole.VIEWER); dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(svc.invited.isEmpty())
+        assertTrue(model.actionError != null)
+    }
+
+    @Test fun countsAreThousandsGrouped() {
+        assertEquals("12,400", VerifiedCount(12_400, verified = true).label)
+        assertEquals("8,400", PartnerMetric("People reached", 8400, PartnerMetric.Unit.PEOPLE).valueLabel)
+    }
+
+    @Test fun adminCannotRemoveThemselves() = runTest {
+        val svc = FakeService()
+        val model = PartnerModel(svc)
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        assertFalse(model.canRemove(svc.users.first { it.id == "u1" }))
+        model.removeUser("u1"); dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(svc.removed.isEmpty())
+        assertTrue(model.actionError != null)
+    }
+
+    @Test fun adminCanRemoveAnotherUser() = runTest {
+        val svc = FakeService()
+        val model = PartnerModel(svc)
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(model.canRemove(svc.users.first { it.id == "u2" }))
+        model.removeUser("u2"); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(listOf("u2"), svc.removed)
+        assertNull(model.actionError)
+    }
+
+    @Test fun lastAdminCannotBeRemovedEvenWhenSelfIsUnknown() = runTest {
+        val svc = FakeService().apply { selfId = null; users.removeAll { it.id == "u3" } }
+        val model = PartnerModel(svc)
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        assertFalse(model.canRemove(svc.users.first { it.id == "u1" }))
+        model.removeUser("u1"); dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(svc.removed.isEmpty())
+    }
+
+    @Test fun selfIdComesFromOverviewUserId() = runTest {
+        val svc = FakeService().apply { selfId = "u3" }
+        val model = PartnerModel(svc)
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals("u3", model.snapshot?.selfId)
+        assertEquals("u3", svc.signedInUserId())
+        assertFalse(model.canRemove(svc.users.first { it.id == "u3" }))
     }
 }

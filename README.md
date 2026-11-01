@@ -1,8 +1,40 @@
 # DAD Android
 
-Kotlin/Jetpack Compose donor-app foundation using DAD-Main's Go API. Separate native
-apps were selected on 18 October 2026. Product features and navigation still require
-the mobile PRD.
+Kotlin/Jetpack Compose donor and partner app using DAD-Main's Go API. Separate native
+apps were selected on 18 October 2026. The session, transport, and deep-link foundation
+is production-grade. The product screens (giving, impact, network and badges, events,
+settings, partner portal) are built against service seams and are reachable today only
+through DEBUG preview launch extras (`preview_giving`, `preview_events`, and so on);
+wiring them to the generated client is the remaining integration work (phased; Phase 1 below is done).
+
+**Wired against the API (Phase 1):** donor phone + SMS sign-in (`beginPhoneSignIn`/`finishPhoneSignIn`,
+existing accounts only), claim-link sign-in, profile read, settings load/save (`savePreferences`),
+refresh, logout and real account deletion. Authenticated calls go through `ProductClient.perform` ->
+`AccountSession.authorized` (single-flight refresh, one bounded 401 retry, epoch-guarded); sign-in
+installs credentials through `AccountSession.establish` so the session owns the await. Settings is
+reachable from the donor shell; sign-out, deletion and a revoked session return to sign-in. Partner
+sign-in is not wired (it shows an honest notice). A
+release build with no `dadApiOrigin` shows a "not configured" notice and never serves synthetic data.
+
+**Wired against the API (Phase 2, donor home):** the signed-in donor landing now shows the real dashboard
+(`GET /donor/me/dashboard`: streak card with the 30-day ladder and at-risk grace notice, national/city rank,
+total given, network and referral totals; `preparing` shows "Getting your dashboard ready"), today's initiative
+(`todayInitiative`; a 404 means nothing is in rotation, not an error; the card carries the A-5 note that this is
+display attribution, not designated giving) and a gift history screen (`gifts` 50 per page, capped at 500 rows in
+memory, a non-advancing offset ends paging, paging cancels when the screen closes) with an inline gift record
+(`receipt`) and the calendar-year total (`annualSummary`). The rank line follows the explicit
+`rankings_opted_out` flag (opted out shows no rank line; opted in but unranked says "Not ranked yet"), and
+`national_percentile` is shown as the top bucket it is (2 = "Top 2%"). Unknown figures (a null streak, network,
+referrals or total given) are shown as unknown, never as zero. A failed refresh keeps the cards on screen with a
+notice; a 401 refreshes once and then signs out; an undocumented 429 is "too many requests", any other
+undocumented status is "unavailable". These five GETs are decoded from raw JSON in `WireDashboard` with strict
+null handling, because the generated Kotlin models flatten the dashboard's `oneOf` and turn nullable members
+into non-null types that Gson would silently fill with zeros. Not wired yet: `saveProfile`, receipt PDF/share. Engagement (see below) is wired; the partner portal remains a DEBUG preview.
+
+Account deletion calls `POST /donor/me/delete` first and wipes local state (Keystore credentials and
+attribution) only on success; a 409 (active monthly gift or open checkout) is explained and nothing is
+wiped. Disclose in the Play Data safety "account deletion" answers that personal data is deleted while
+required gift/receipt records are retained.
 
 ## Build and test
 
@@ -13,22 +45,24 @@ its own Gradle distribution.
 
 ```sh
 node scripts/check-foundation.mjs
-./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --warning-mode all
+./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleRelease :app:lintRelease --warning-mode all
 ```
 
 Open this folder in Android Studio and run the app on Android 8/API 26 or newer.
-By default it uses a labeled synthetic account through the session API. Android
-instrumentation tests cover Compose loading/retry and actual Keystore storage:
+By default a debug build uses a labeled synthetic account through the session API (`preview_signed_out` starts it signed out; code 123456 signs in). The `stub_backend` extra runs the REAL sign-in, session, settings and donor-home code on a scripted in-process transport (debug source set only) for the instrumentation tests; `stub_signed_in` starts with a stored session, and `stub_dashboard_empty` / `stub_dashboard_fail_first` / `stub_dashboard_unranked` pick the donor-home scenario. Android
+instrumentation tests cover the Compose journeys and actual Keystore storage:
 `./gradlew :app:connectedDebugAndroidTest` with a running emulator. CI runs the same
 checks on API 35, and lint treats warnings as errors. AGP 9.4 itself emits Gradle
 configuration deprecation diagnostics; those upstream warnings are not suppressed.
 
 ## Contract, sessions, and transport
 
-`foundation.lock.json` pins mobile foundation 2.0.0 and its manifest SHA-256.
-The vendored release is verified before code generation. The build invokes pinned
+`foundation.lock.json` pins the mobile foundation release (currently 2.7.0, tag
+`mobile-foundation-v2.7.0`) and its manifest
+SHA-256. The vendored release is verified before code generation. The build invokes pinned
 OpenAPI Generator CLI 7.20.0 and generates Retrofit coroutine interfaces and Gson models
-for profile, claim, refresh, and logout. No client is generated from a moving branch.
+for the operations allow-listed in `scripts/prepare-client.mjs`. No client is generated
+from a moving branch.
 Generated sources and copied tokens/link assets stay in ignored build directories.
 The application packages link rules, not the API schemas.
 
@@ -62,10 +96,34 @@ Production app links require the signing certificate's SHA-256 in a matching
 DAD-Main `assetlinks.json`, plus an HTTPS VIEW intent filter with the verified
 host. The release build ships application ID `org.dad.foundation`; the debug
 build uses `org.dad.foundation.debug` so both install side by side. Camera, push, and
-Wallet ports are defined; provider configuration, permission timing, sign-in UI/passkeys,
-final screens, and real-device acceptance follow the PRD. No permission is requested on
+Wallet ports are defined; provider configuration, permission timing, final screens, and
+real-device acceptance follow the PRD. Phone, email signup and
+password sign-in are wired (see below). No permission is requested on
 startup, analytics are not enabled, and no staging/production service is contacted by
 the synthetic preview.
+
+## Sign-in methods (Phase 1b, contract 2.4.0)
+
+**Wired:** email signup (`postDonorSignup`: name, email, ZIP, city; the server emails a single-use link, which
+the app claims when it opens or from a pasted link on "Check your email"), email + password sign-in
+(`postDonorPasswordSignIn`, sends `device_name` and platform `ANDROID`), and set/change password in Settings
+(`postDonorMePassword`: a 422 with code `CURRENT_PASSWORD_INCORRECT` is a wrong current password and keeps the
+session; a real 401 refreshes once, then signs out). Passwords are masked, never logged, and cleared after send.
+
+**Built but switched off until configured:** Google sign-in (`oidcSignIn`) and passkeys
+(`beginDonorPasskeySignIn`/`finishDonorPasskeySignIn`). The server exchanges, models, UI states and stub-transport
+tests exist; the screen says "Not available yet" because no platform provider is linked. Sign in with Apple is
+not offered on Android. To turn them on you must supply:
+
+- **Both:** the AndroidX Credential Manager dependency (`androidx.credentials`, plus
+  `androidx.credentials:credentials-play-services-auth` for older devices), and an implementation of
+  `GoogleIdTokenProvider` / `PasskeyAuthenticator` passed in `ExternalSignInDeps` (not yet written, a dependency decision).
+- **Google:** a Google Cloud *web* OAuth client ID (`-PdadGoogleWebClientId=...apps.googleusercontent.com`), an Android
+  OAuth client for the release signing certificate's SHA-1, and the Google ID library
+  (`com.google.android.libraries.identity.googleid`). The same client ID must be accepted by DAD-Main's OIDC verifier.
+- **Passkeys:** the relying-party domain (`-PdadPasskeyRpId=dad.example`) and that domain's
+  `/.well-known/assetlinks.json` with the `delegate_permission/common.get_login_creds` relation for the app
+  package and release certificate fingerprint.
 
 ## Release signing
 
@@ -112,3 +170,53 @@ HTTPS Go API: claim/profile, expired-access refresh and credential replacement,
 revocation cleanup, and logout. Test-only transports trust the temporary server's
 certificate; production TLS settings are unchanged. No provider credentials are used.
 The test runner removes the private proof fixtures after either success or failure.
+
+## Giving (wiring phase 3, contract 2.6.0)
+
+Starting a gift uses `startRecurringCheckout`; changing the amount, cancelling and the card update use
+`changeAmount`, `cancelRecurring` and `beginPaymentUpdate`. Hosted Stripe pages open in a Custom Tab
+(`androidx.browser`, already a dependency). The return page proves nothing: when the donor comes back the app
+polls `GET /donor/me/recurring` (5 reads, 2 s apart) until a subscription is present. Each command holds one
+Idempotency-Key, reused after a 429, 503 or lost response and retired on success, 403, 409 or 422. The giving
+reads are parsed from raw JSON so an unlisted Stripe status (`paused`, `trialing`) never fails the response.
+No App Link is registered for `/app/return`, so the donor closes the tab to return. Deleting an account with a
+renewing gift (409) offers "Cancel my monthly gift" first. Debug stub extras: `stub_gift_active`,
+`stub_gift_fail_first`, `stub_dashboard_slow`, `stub_open_gift`.
+
+## Events (wiring phase 4, contract 2.7.0)
+
+`WireEvents` merges `donorEvents` and `inviteOnlyEvents` (de-duplicated, soonest first) and drives detail,
+reserve / waitlist, cancel, check-in and the authenticated calendar file. The reads are parsed from raw JSON so
+an unlisted `type`, `reservation_status` or reserve result never fails the list. Times show in the event's own
+`time_zone` with the zone named. Check-in is offered only for a held seat between start and end (no early grace)
+and shows `checked_in_at`; the 66-character token shape is checked before anything is sent. "Scan QR code" asks for
+the camera permission only when tapped, then shows a live CameraX viewfinder decoded by ML Kit's bundled
+QR model (works offline; ZXing core remains for generating the invite QR). The first well-formed token checks in
+once; other codes show a hint and scanning continues. Denied or unavailable camera falls back to typing the code,
+which is always on screen. Live capture is device-only; tests use a fake scanner source. "Add to calendar" shares the `.ics`
+through a FileProvider URI and the share sheet (no calendar permission). The contract defines no Idempotency-Key
+for these commands. Debug stub extras: `stub_events_invited`, `stub_events_fail_first`, `stub_events_not_eligible`.
+
+## Engagement (wiring phase 5, contract 2.7.0)
+
+Real `WireEngagement` behind `EngagementService`, opened from the donor home ("See your impact"): lifetime impact
+and rank from `dashboard`, the badge grid (`donorBadges`; earned / locked and the perk are stated in text, perk
+gating follows the server codes F / 1K / TC, perk keys map to copy), the referral network (`donorNetwork`),
+the invite (`sharing` + `conversions`) and the rankings choice (`profile` + `savePreferences`, explicit
+`rankings_opted_out`: read the profile, save the whole block with its version, one re-read on a 409; the card flips
+at once and reverts with an inline notice if the save fails). Today's initiative card opens the spend drill-in
+(`initiativeSpend`, A-3, totals by category only).
+
+- **Unknown is not zero.** Each section the server did not give shows "can't be shown right now" (or "—"); an
+  unreadable section never becomes an empty grid, a zero or "not ranked". Sections are read concurrently and kept
+  independently.
+- **Rank label.** `national_percentile` is the top bucket as sent (2 reads "Top 2% nationally"), clamped to 1..100.
+- **Invite links** are `<DAD_PUBLIC_ORIGIN>/r/<code>`; the in-person variant (and the QR, drawn locally from ZXing's
+  matrix) is `/r/<code>?via=irl`. The code is parsed from the `sharing` link path (1-64 of `[A-Za-z0-9_-]`); the link is
+  rebuilt from the configured origin, never taken from the server, and with no configured origin there is no link.
+  A donor with no public name is prompted to choose one (`saveSharing`).
+- **Raw JSON.** The engagement routes are decoded from raw JSON so `Conversion.kind` (an open string) and nullable
+  members cannot be coerced by Gson. Statuses map as in `WireStatus.kt`.
+- **Test stub.** `stub_backend` + `stub_signed_in` serves badges, network, sharing, conversions and a spend
+  (`stub_open_engagement`, `stub_no_public_name`, `stub_rankings_fail_toggle`, `stub_badges_down`,
+  `stub_network_down`, `stub_spend_unpublished`). `preview_impact` still shows the in-memory preview.

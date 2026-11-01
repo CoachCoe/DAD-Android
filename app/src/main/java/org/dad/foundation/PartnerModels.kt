@@ -22,6 +22,8 @@ data class PartnerSnapshot(
     val spend: List<PartnerSpendCategory>,
     val people: PartnerPeople?,
     val users: List<PartnerUser>,
+    /** The signed-in user's own id, when the session knows it; null when unknown. */
+    val selfId: String? = null,
 )
 
 /** Thrown by a conformer when the signed-in partner account is still awaiting approval (P-2):
@@ -38,6 +40,10 @@ interface PartnerService {
     suspend fun removeUser(id: String)
     suspend fun registerPushDevice(token: String)
     suspend fun unregisterPushDevice()
+
+    /** The signed-in partner user's own id, taken from the overview's `user_id` (contract 2.3.0), or
+     *  null when the overview carries none. Used to stop an admin removing themselves. */
+    suspend fun signedInUserId(): String? = overview().userId
 }
 
 sealed interface PartnerPhase {
@@ -69,10 +75,11 @@ class PartnerModel(private val service: PartnerService) : ViewModel() {
                 val overview = service.overview()
                 snapshot = PartnerSnapshot(
                     overview = overview,
-                    initiatives = runCatching { service.initiatives() }.getOrDefault(emptyList()),
-                    spend = runCatching { service.spend() }.getOrDefault(emptyList()),
-                    people = runCatching { service.people() }.getOrNull(),
-                    users = runCatching { service.users() }.getOrDefault(emptyList()),
+                    initiatives = optional(emptyList()) { service.initiatives() },
+                    spend = optional(emptyList()) { service.spend() },
+                    people = optional(null) { service.people() },
+                    users = optional(emptyList()) { service.users() },
+                    selfId = overview.userId ?: optional(null) { service.signedInUserId() },
                 )
                 phase = PartnerPhase.Ready
             } catch (error: CancellationException) {
@@ -89,11 +96,13 @@ class PartnerModel(private val service: PartnerService) : ViewModel() {
      *  is a no-op that surfaces the gate rather than hitting the network. */
     fun inviteUser(email: String, role: PartnerRole) {
         if (!this.role.canManageUsers) { actionError = "Only an admin can invite users."; return }
+        if (!isPlausibleEmail(email)) { actionError = "Enter a valid email address."; return }
         actionError = null
         viewModelScope.launch {
             try {
                 service.inviteUser(email, role)
-                snapshot = snapshot?.copy(users = runCatching { service.users() }.getOrDefault(snapshot?.users ?: emptyList()))
+                val fallback = snapshot?.users ?: emptyList()
+                snapshot = snapshot?.copy(users = optional(fallback) { service.users() })
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -102,8 +111,21 @@ class PartnerModel(private val service: PartnerService) : ViewModel() {
         }
     }
 
+    /**
+     * Whether [user] may be removed by the signed-in admin: never yourself, and never the last
+     * remaining admin (which also covers a session that cannot identify its own user).
+     */
+    fun canRemove(user: PartnerUser): Boolean {
+        val current = snapshot ?: return false
+        if (!role.canManageUsers || user.id == current.selfId) return false
+        val admins = current.users.count { it.role == PartnerRole.ADMIN }
+        return !(user.role == PartnerRole.ADMIN && admins <= 1)
+    }
+
     fun removeUser(id: String) {
         if (!role.canManageUsers) { actionError = "Only an admin can remove users."; return }
+        val target = snapshot?.users?.firstOrNull { it.id == id }
+        if (target == null || !canRemove(target)) { actionError = "You can't remove this user."; return }
         actionError = null
         viewModelScope.launch {
             try {
@@ -119,11 +141,27 @@ class PartnerModel(private val service: PartnerService) : ViewModel() {
 
     /** Register this device for partner push after sign-in (§7.5). Best-effort — never blocks. */
     fun registerPush(token: String) {
-        viewModelScope.launch { runCatching { service.registerPushDevice(token) } }
+        viewModelScope.launch { bestEffort { service.registerPushDevice(token) } }
     }
 
     fun unregisterPush() {
-        viewModelScope.launch { runCatching { service.unregisterPushDevice() } }
+        viewModelScope.launch { bestEffort { service.unregisterPushDevice() } }
+    }
+
+    /** A secondary read: a failure hides that section rather than the whole portal. Cancellation and
+     *  an ended session still propagate. */
+    private suspend fun <T> optional(fallback: T, read: suspend () -> T): T = try {
+        read()
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: AccountFailure.SignedOut) {
+        throw error
+    } catch (_: Exception) {
+        fallback
+    }
+
+    private suspend fun bestEffort(action: suspend () -> Unit) {
+        try { action() } catch (error: CancellationException) { throw error } catch (_: Exception) { }
     }
 
     private fun message(error: Exception): String = when (error) {
@@ -160,6 +198,7 @@ class PreviewPartnerService(
             peopleReached = VerifiedCount(12_400, verified = true),
             employeesEnrolled = 86, workforceSize = 240, enrolledPercent = 35,
             updatedAt = Date(1_793_000_000_000), hasLogo = false,
+            userId = if (role == PartnerRole.ADMIN) "u1" else "u2",
         )
     }
 

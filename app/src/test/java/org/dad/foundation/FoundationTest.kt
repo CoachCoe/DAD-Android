@@ -111,6 +111,10 @@ class FoundationTest {
         assertEquals(AccountDestination.GIFTS, router.notification("/account/gifts"))
         assertNull(router.notification("https://public.test/account/dashboard"))
         assertTrue(router.route("https://public.test/r/friend?via=irl") is LinkIntent.Web)
+        listOf(Referral.inviteLink("https://public.test", "friend"), Referral.inviteLink("https://public.test", "friend", inPerson = true))
+            .forEach { assertTrue(it, router.route(it!!) is LinkIntent.Web) }
+        assertTrue(json.contains("\"referral_prefix\": \"/r/\""))
+        assertEquals("https://public.test/r/friend", Referral.inviteLink("https://public.test", "friend"))
         val gate = NavigationGate()
         assertNull(gate.receive(AccountDestination.DASHBOARD, false))
         assertEquals(AccountDestination.DASHBOARD, gate.signedIn())

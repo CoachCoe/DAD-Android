@@ -31,6 +31,9 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         val apiOrigin = providers.gradleProperty("dadApiOrigin").orElse("").get()
         buildConfigField("String", "DAD_API_ORIGIN", groovy.json.JsonOutput.toJson(apiOrigin))
+        // Optional sign-in methods stay off until the owner supplies these (see README). Blank = off.
+        buildConfigField("String", "DAD_GOOGLE_WEB_CLIENT_ID", groovy.json.JsonOutput.toJson(providers.gradleProperty("dadGoogleWebClientId").orElse("").get()))
+        buildConfigField("String", "DAD_PASSKEY_RP_ID", groovy.json.JsonOutput.toJson(providers.gradleProperty("dadPasskeyRpId").orElse("").get()))
         buildConfigField("String", "DAD_PUBLIC_ORIGIN", groovy.json.JsonOutput.toJson(providers.gradleProperty("dadPublicOrigin").orElse("").get()))
     }
     signingConfigs {
@@ -135,8 +138,13 @@ dependencies {
     // R-1/R-2: QR generation for the IRL invite code. Pure-JVM core so the encode/decode
     // round-trip is a unit test (no emulator).
     implementation("com.google.zxing:core:3.5.3")
-    // D-3 (risk #4): Play Install Referrer for deferred attribution across a Play install.
-    implementation("com.android.installreferrer:installreferrer:2.2")
+    // E-8: live QR scanning for event check-in. CameraX drives the viewfinder; ML Kit's BUNDLED barcode model
+    // (not the Play Services one) decodes, so the first scan works offline with no model download.
+    implementation("androidx.camera:camera-core:1.6.2")
+    implementation("androidx.camera:camera-camera2:1.6.2")
+    implementation("androidx.camera:camera-lifecycle:1.6.2")
+    implementation("androidx.camera:camera-view:1.6.2")
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")

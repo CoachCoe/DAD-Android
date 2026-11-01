@@ -12,7 +12,5 @@
 -keep class org.dad.foundation.generated.model.** { <fields>; }
 -keepclassmembers class org.dad.foundation.generated.model.** { <fields>; }
 
-# ZXing (QR encode/decode) and the Play Install Referrer client are reached
-# reflectively in places; keep their public API.
--keep class com.google.zxing.** { *; }
--keep class com.android.installreferrer.** { *; }
+# ZXing is only reached through direct calls (Referral.qrMatrix -> QRCodeWriter); it uses no
+# reflection or service loading, so R8 traces what it needs and no keep rule is required.

@@ -14,12 +14,14 @@ const allowed = new Set([
   // auth / session management (Phase 1 auth shell)
   "login", "logoutAll", "sessions", "revokeSession", "revokeOtherSessions",
   "beginPhoneSignIn", "finishPhoneSignIn", "oidcSignIn",
+  // P1b: email signup + password sign-in + set/change password (contract 2.4.0)
+  "postDonorSignup", "postDonorPasswordSignIn", "postDonorMePassword",
   "beginDonorPasskeyRegister", "finishDonorPasskeyRegister",
   "beginDonorPasskeySignIn", "finishDonorPasskeySignIn", "donorPasskeys", "deleteDonorPasskey",
   "requestEmailChange", "confirmEmailChange",
   // donor account + giving
   "dashboard", "gifts", "recurring", "cancelRecurring", "changeAmount", "amountOptions",
-  "paymentMethod", "beginPaymentUpdate", "receipt", "annualSummary",
+  "paymentMethod", "beginPaymentUpdate", "startRecurringCheckout", "receipt", "annualSummary",
   "savePreferences", "saveProfile", "saveSharing", "sharing", "deleteAccount",
   "walletProviders", "applePass", "googlePass",
   // impact / streak / initiatives / rankings

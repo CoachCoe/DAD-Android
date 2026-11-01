@@ -53,9 +53,7 @@ class AttributionTest {
         assertEquals(1, analytics.events.size)
         val event = analytics.events.first() as AnalyticsEvent.AttributionCaptured
         assertEquals("attribution_captured", event.name)
-        assertEquals(true, event.properties["has_invite"])
-        assertEquals(false, event.properties["has_company"])
-        assertEquals("qr", event.properties["source"])
+        assertEquals(mapOf("source" to "link"), event.properties)
     }
 
     @Test fun reCaptureOfIdenticalPayloadDoesNotReEmit() {
@@ -105,13 +103,14 @@ class AttributionTest {
 
     // --- invite link + QR round-trip (R-1/R-2) ---
     @Test fun inviteLinkBuildsAndRejectsBadInput() {
-        assertEquals("https://dad.org/invite?ref=ABC123", Referral.inviteLink("https://dad.org/", "ABC123"))
+        assertEquals("https://dad.org/r/ABC123", Referral.inviteLink("https://dad.org/", "ABC123"))
+        assertEquals("https://dad.org/r/ABC123?via=irl", Referral.inviteLink("https://dad.org", "ABC123", inPerson = true))
         assertNull(Referral.inviteLink("http://dad.org", "ABC123")) // non-https rejected
         assertNull(Referral.inviteLink("https://dad.org", "bad code")) // unsanitary code rejected
     }
 
     @Test fun qrMatrixRoundTripsThroughDecoder() {
-        val link = "https://dad.org/invite?ref=ROUNDTRIP9"
+        val link = "https://dad.org/r/ROUNDTRIP9"
         val matrix = Referral.qrMatrix(link, size = 256)
         // Render the boolean matrix into an ARGB pixel buffer and decode it back.
         val h = matrix.size; val w = matrix[0].size
@@ -125,9 +124,30 @@ class AttributionTest {
     @Test fun analyticsEventsCarryExpectedNames() {
         assertEquals("invite_shared", AnalyticsEvent.InviteShared("sms").name)
         assertEquals("irl_code_shown", AnalyticsEvent.IrlCodeShown.name)
-        assertEquals("referral_converted", AnalyticsEvent.ReferralConverted("INV").name)
-        assertEquals(true, (AnalyticsEvent.ReferralConverted("INV") as AnalyticsEvent).properties["has_invite"])
-        assertFalse((AnalyticsEvent.ReferralConverted(null)).properties["has_invite"] as Boolean)
+        assertEquals("referral_converted", AnalyticsEvent.ReferralConverted.name)
+    }
+
+    /** Pins each event's payload to DAD-Main's ingest allow-list (analytics.go eventProperties). */
+    @Test fun analyticsPayloadsMatchTheIngestAllowList() {
+        assertEquals(mapOf("source" to "link"), AnalyticsEvent.AttributionCaptured(AttributionSource.LINK).properties)
+        assertEquals(mapOf("source" to "IRL"), AnalyticsEvent.AttributionCaptured(AttributionSource.IRL).properties)
+        assertEquals(mapOf("source" to "company"), AnalyticsEvent.AttributionCaptured(AttributionSource.COMPANY).properties)
+        assertEquals(mapOf("channel" to "sms"), AnalyticsEvent.InviteShared("sms").properties)
+        assertTrue(AnalyticsEvent.IrlCodeShown.properties.isEmpty())
+        assertTrue(AnalyticsEvent.ReferralConverted.properties.isEmpty())
+    }
+
+    @Test fun attributionSourceIsTheTouchKindNotTheCampaignTag() {
+        assertEquals(AttributionSource.IRL, AttributionSource.of(Attribution.of(irlCode = "I1", inviteCode = "X")))
+        assertEquals(AttributionSource.LINK, AttributionSource.of(Attribution.of(inviteCode = "X", source = "qr")))
+        assertEquals(AttributionSource.COMPANY, AttributionSource.of(Attribution.of(companyCode = "ACME")))
+        assertNull(AttributionSource.of(Attribution.of(source = "utm")))
+    }
+
+    @Test fun campaignTagOnlyCaptureEmitsNoInvalidEvent() {
+        val analytics = RecordingAnalyticsEmitter()
+        AttributionCapture(MemoryAttributionStore(), analytics).capture(Attribution.of(source = "utm"))
+        assertTrue(analytics.events.isEmpty())
     }
 
     @Test fun shareActionEmitsInviteShared() {
@@ -137,8 +157,8 @@ class AttributionTest {
             override fun share(link: String, channel: String) { sharedLink = link }
             override fun copy(link: String) {}
         }
-        ReferralShareAction(sharer, analytics).share("https://dad.org/invite?ref=X", "sms")
-        assertEquals("https://dad.org/invite?ref=X", sharedLink)
+        ReferralShareAction(sharer, analytics).share("https://dad.org/r/X", "sms")
+        assertEquals("https://dad.org/r/X", sharedLink)
         assertEquals("invite_shared", analytics.events.single().name)
         assertEquals("sms", (analytics.events.single() as AnalyticsEvent.InviteShared).channel)
     }

@@ -79,6 +79,7 @@ class GivingTest {
     ) : GivingService {
         var changedTo: Int? = null
         var cancelledId: String? = null
+        var cancelCalls = 0
         override suspend fun recurring(): RecurringState {
             if (failLoad) throw AccountFailure.Unavailable
             return state
@@ -89,9 +90,13 @@ class GivingTest {
         }
         override suspend fun cancel(subscriptionId: String, periodEnd: Date): RecurringState {
             cancelledId = subscriptionId
+            cancelCalls++
             return RecurringState.Ending(subscriptionId, 3000, periodEnd, Date(periodEnd.time + 1))
         }
+        override suspend fun amountOffer(): AmountOffer? = null
+        override suspend fun paymentMethod(): PaymentMethodState = PaymentMethodState(PaymentMethodState.Kind.NONE)
         override suspend fun beginPayment(): PaymentPath = PaymentPath.WebCheckoutHandoff("https://pay.example/setup")
+        override suspend fun startGift(amountMinor: Int): PaymentPath = PaymentPath.WebCheckoutHandoff("https://pay.example/checkout")
     }
 
     @Test fun loadSyncsSelectionToActiveAmount() = runTest {
@@ -154,5 +159,25 @@ class GivingTest {
         model.cancel()
         dispatcher.scheduler.advanceUntilIdle()
         assertTrue(model.phase is GivingPhase.Failed)
+    }
+
+    @Test fun doubleTappedCancelCancelsOnce() = runTest {
+        val service = FakeGivingService(RecurringState.Active("sub_1", 3000, Date(0)))
+        val model = GivingModel(service)
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        model.cancel()
+        model.cancel()
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(1, service.cancelCalls)
+        assertTrue(model.recurring is RecurringState.Ending)
+    }
+
+    @Test fun giftHeadingCoversEveryState() {
+        val d = Date(0)
+        assertEquals("Your monthly gift", giftHeading(false, RecurringState.None))
+        assertEquals("Start a monthly gift", giftHeading(true, RecurringState.None))
+        assertEquals("Your gift is on its way", giftHeading(true, RecurringState.Preparing))
+        assertEquals("Your monthly gift", giftHeading(true, RecurringState.Active("s", 3000, d)))
+        assertEquals("Your gift is ending", giftHeading(true, RecurringState.Ending("s", 3000, d, d)))
     }
 }

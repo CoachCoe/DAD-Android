@@ -5,7 +5,9 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.AtomicFile
 import com.google.gson.Gson
+import com.google.gson.JsonParseException
 import java.io.File
+import java.security.GeneralSecurityException
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -26,13 +28,21 @@ class KeystoreCredentialStore(context: Context) : CredentialStore {
     }
     @Synchronized override fun load(): Credentials? {
         if (!file.baseFile.exists()) return null
-        val raw = file.readFully()
+        // A session that cannot be decrypted or parsed (key invalidated, file corrupted) is
+        // unrecoverable; treating it as signed out lets the donor sign in again instead of
+        // failing every launch.
+        return try { decrypt(file.readFully()) }
+        catch (_: GeneralSecurityException) { clear(); null }
+        catch (_: IllegalArgumentException) { clear(); null }
+        catch (_: JsonParseException) { clear(); null }
+    }
+    private fun decrypt(raw: ByteArray): Credentials {
         require(raw.size in 29..16384) { "Invalid encrypted session" }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, raw.copyOfRange(0, 12)))
         cipher.updateAAD(alias.toByteArray())
         val value = gson.fromJson(String(cipher.doFinal(raw.copyOfRange(12, raw.size)), Charsets.UTF_8), Credentials::class.java)
-        require(!value.access.isNullOrBlank() && !value.refresh.isNullOrBlank()) { "Invalid stored session" }
+        require(value != null && !value.access.isNullOrBlank() && !value.refresh.isNullOrBlank()) { "Invalid stored session" }
         return value
     }
     @Synchronized override fun save(value: Credentials) {

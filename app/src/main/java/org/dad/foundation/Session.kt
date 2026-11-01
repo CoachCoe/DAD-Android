@@ -15,6 +15,24 @@ sealed class AccountFailure : java.io.IOException() {
     data object SignedOut : AccountFailure()
     data object Unavailable : AccountFailure()
     data object InvalidResponse : AccountFailure()
+    /** 429: the server is throttling this caller; retry later. */
+    data object RateLimited : AccountFailure()
+    /** 422: the server rejected a value as malformed (e.g. a phone number). */
+    data object InvalidInput : AccountFailure()
+    /** 409 on account deletion: a monthly gift is still set to renew or a checkout is open. */
+    data object DeletionBlocked : AccountFailure()
+    /** 422 `CURRENT_PASSWORD_INCORRECT` on set-password: a wrong typed value, NOT a bad session. Never ends the session. */
+    data object PasswordIncorrect : AccountFailure()
+    /** 404: the item is gone, or hidden from this donor (an invite-only event they are not invited to). */
+    data object NotFound : AccountFailure()
+    /** 403: the account is not allowed this command (giving unavailable; not eligible for an event). */
+    data object Forbidden : AccountFailure()
+    /** 409 on a giving command: billing changed (or a checkout is open) since the screen last read it; re-read, then retry. */
+    data object Conflict : AccountFailure()
+    /** 503 carrying a `code`: this deployment has deliberately not configured payments. Not transient. */
+    data object PaymentsUnavailable : AccountFailure()
+    /** The build has no usable API origin; nothing is ever served from a synthetic fallback. */
+    data object InvalidConfiguration : AccountFailure()
 }
 
 data class Credentials(val access: String, val refresh: String, val expiresAtMillis: Long) {
@@ -42,9 +60,16 @@ class AccountSession(private val api: AccountAPI, private val store: CredentialS
     private data class Flight(val id: Long, val result: Deferred<Credentials>)
     private var flight: Flight? = null
 
-    suspend fun claim(token: String) {
+    suspend fun claim(token: String) { establish { api.claim(token) } }
+
+    /**
+     * Install credentials produced by [produce]. The session owns the await: the epoch captured
+     * before it guards the install, so a sign-in that resolves after a sign-out (or after another
+     * sign-in) is discarded with [AccountFailure.SignedOut] instead of clobbering state.
+     */
+    suspend fun establish(produce: suspend () -> Credentials): Credentials {
         val before = mutex.withLock { epoch }
-        val result = api.claim(token)
+        val result = produce()
         mutex.withLock {
             if (epoch != before) throw AccountFailure.SignedOut
             store.save(result)
@@ -52,7 +77,21 @@ class AccountSession(private val api: AccountAPI, private val store: CredentialS
             epoch++
             flight = null
         }
+        return result
     }
+
+    /** Whether stored credentials existed when the session was created (decides restore vs sign-in). */
+    val restoredCredentials: Boolean = credentials != null
+
+    /** True while this session holds credentials (the server may still reject them later). */
+    suspend fun isSignedIn(): Boolean = mutex.withLock { credentials != null }
+
+    /**
+     * Drop local credentials without contacting the server (after a confirmed server-side account
+     * deletion, where the remote session no longer exists). Bumps the epoch so any in-flight call
+     * or sign-in started before it is discarded.
+     */
+    suspend fun discardLocal() { mutex.withLock { clearLocal() } }
 
     /**
      * A valid bearer access token for a product API call, refreshed via the same single-flight
@@ -63,14 +102,24 @@ class AccountSession(private val api: AccountAPI, private val store: CredentialS
         return usableCredentials().access
     }
 
-    suspend fun profile(): AccountProfile {        currentCoroutineContext().ensureActive()
+    suspend fun profile(): AccountProfile = authorized { api.profile(it) }
+
+    /**
+     * Run one authenticated call with a currently-valid access token: refresh through the single
+     * flight if expired; on a 401 (the call throws [AccountFailure.SignedOut]) force exactly one
+     * refresh and retry once; a second 401 ends the session locally. A sign-out or sign-in while the
+     * call is in flight (epoch change) or caller cancellation discards the result. Only for requests
+     * the server has not processed when it answers 401 (it rejects before handling).
+     */
+    suspend fun <T> authorized(call: suspend (String) -> T): T {
+        currentCoroutineContext().ensureActive()
         val before = mutex.withLock { epoch }
         val current = usableCredentials()
-        try { return checkedProfile(current, before) }
+        try { return checked(call, current, before) }
         catch (_: AccountFailure.SignedOut) {
             mutex.withLock { if (epoch != before) throw AccountFailure.SignedOut }
             val next = usableCredentials(current.access)
-            try { return checkedProfile(next, before) }
+            try { return checked(call, next, before) }
             catch (_: AccountFailure.SignedOut) {
                 mutex.withLock { if (epoch == before) clearLocal() }
                 throw AccountFailure.SignedOut
@@ -78,8 +127,8 @@ class AccountSession(private val api: AccountAPI, private val store: CredentialS
         }
     }
 
-    private suspend fun checkedProfile(value: Credentials, before: Long): AccountProfile {
-        val result = api.profile(value.access)
+    private suspend fun <T> checked(call: suspend (String) -> T, value: Credentials, before: Long): T {
+        val result = call(value.access)
         mutex.withLock { if (before != epoch) throw AccountFailure.SignedOut }
         currentCoroutineContext().ensureActive()
         return result

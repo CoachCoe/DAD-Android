@@ -114,21 +114,42 @@ data class ImpactTotals(
 // MARK: - Rankings (K-1..K-3), opt-out hides self
 
 /**
- * National/city standing. Opting out yields an all-null standing so no position is ever shown, and
- * the UI must never render a name list.
+ * National/city standing. [optedOut] mirrors the explicit `rankings_opted_out` flag — read from the donor
+ * dashboard (contract v2.3.0) wherever the dashboard is the source, and the profile otherwise — — it is NOT inferred from missing figures, because a donor can be unranked
+ * (null standing) without having opted out. When opted out no position is ever shown, and the UI
+ * must never render a name list.
  */
 data class RankingStanding(
     val nationalPercentile: Int?,
     val city: String?,
     val cityRank: Int?,
+    val optedOut: Boolean = false,
 ) {
-    val isOptedOut: Boolean get() = nationalPercentile == null && city == null && cityRank == null
+    val isOptedOut: Boolean get() = optedOut
 
-    /** "Top 8% nationally" (from the 92nd percentile), or null when opted out / unknown. */
-    val nationalLabel: String? get() = nationalPercentile?.let { "Top ${100 - it}% nationally" }
+    companion object {
+        /** The standing of a donor who set `rankings_opted_out`: nothing is shown. */
+        fun optedOut() = RankingStanding(null, null, null, optedOut = true)
+
+        /**
+         * Builds the standing from the dashboard's fields. [rankingsOptedOut] is the dashboard's
+         * explicit flag: true hides every figure, false with null figures means opted in but not
+         * yet ranked.
+         */
+        fun fromDashboard(nationalPercentile: Int?, city: String?, cityRank: Int?, rankingsOptedOut: Boolean) =
+            if (rankingsOptedOut) optedOut() else RankingStanding(nationalPercentile, city, cityRank)
+    }
+
+    /**
+     * "Top 2% nationally". [nationalPercentile] is the server's top-percentile bucket (the contract's
+     * `national_percentile`: 1 = top 1%, 2 = top 2%), so it is shown as-is, never inverted as `100 - x`.
+     * Clamped to 1..100 (never "Top 0%" or "Top 120%"); null when opted out / unknown.
+     */
+    val nationalLabel: String? get() = nationalPercentile?.takeUnless { optedOut }?.let { "Top ${it.coerceIn(1, 100)}% nationally" }
 
     /** "#4 in Austin", or null when opted out / unknown. */
     val cityLabel: String? get() {
+        if (optedOut) return null
         val c = city ?: return null
         val rank = cityRank ?: return null
         return "#$rank in $c"

@@ -3,8 +3,11 @@ package org.dad.foundation
 import android.content.Intent
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.isOff
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -42,14 +45,24 @@ class SettingsFlowTest {
         }
     }
 
+    @Test fun rankingSwitchFlipsAndPersistsThroughTheModel() {
+        launch().use {
+            compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("ranking-toggle")).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("ranking-toggle").performScrollTo().assertIsOn()
+            compose.tapSafely("ranking-toggle")
+            compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("ranking-toggle") and isOff()).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("ranking-toggle").assertIsOff()
+        }
+    }
+
     @Test fun deleteGateStaysDisabledUntilConfirmWordTyped() {
         launch().use {
             compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("settings-home")).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("delete-start").performScrollTo().performClick()
+            compose.tapSafely("delete-start")
             compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("delete-confirm")).fetchSemanticsNodes().isNotEmpty() }
             // Disabled with no / wrong text.
             compose.onNodeWithTag("delete-confirm").performScrollTo().assertIsNotEnabled()
-            compose.onNodeWithTag("delete-input").performScrollTo().performTextInput("DELETE")
+            compose.enterText("delete-input", "DELETE")
             // Enabled once the exact word is present.
             compose.onNodeWithTag("delete-confirm").performScrollTo().assertIsEnabled()
         }
@@ -58,7 +71,7 @@ class SettingsFlowTest {
     @Test fun signOutLeavesTheShell() {
         launch().use {
             compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("settings-signout")).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("settings-signout").performScrollTo().performClick()
+            compose.tapSafely("settings-signout")
             compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("settings-signed-out")).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("settings-signed-out").assertIsDisplayed()
         }

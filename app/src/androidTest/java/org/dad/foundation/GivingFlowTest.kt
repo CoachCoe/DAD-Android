@@ -8,6 +8,7 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Rule
@@ -48,11 +49,12 @@ class GivingFlowTest {
             compose.onNodeWithTag("gift-cancel").performClick()
             compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("cancel-confirm")).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("cancel-confirm").assertIsDisplayed()
-            compose.onNodeWithText("Keep giving").assertIsDisplayed()
-            compose.onNodeWithText("End my gift").assertIsDisplayed()
+            // The screen now carries the payment-method card above the cancel block, so scroll it into view.
+            compose.onNodeWithText("Keep giving").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("End my gift").performScrollTo().assertIsDisplayed()
             // Confirm the cancel: the gift moves to Ending and the screen acknowledges it inline
             // (the gift keeps running until period end) rather than the whole block vanishing.
-            compose.onNodeWithText("End my gift").performClick()
+            compose.onNodeWithText("End my gift").performScrollTo().performClick()
             compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("gift-ending")).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("gift-ending").assertIsDisplayed()
         }

@@ -75,10 +75,9 @@ class MemoryAttributionStore(private var value: Attribution? = null) : Attributi
 /**
  * Captures attribution from an incoming source and MERGES it with whatever was already stored.
  *
- * Precedence is LAST-TOUCH-WINS per PRD R-3 ("last-touch wins"): a newly arriving non-null
+ * Precedence is LAST-TOUCH-WINS per PRD R-4 ("last-touch wins"): a newly arriving non-null
  * field OVERWRITES the stored one, because the most recent referral is the one that converted
- * the donor. (This deliberately differs from the iOS first-writer-wins note — R-3 is the
- * canonical rule and the server also counts conversion on last-touch.) A field absent from the
+ * the donor (the server also counts conversion on last-touch). A field absent from the
  * incoming payload leaves the stored value intact, so a later company-code touch does not wipe
  * an earlier invite that still applies.
  */
@@ -93,7 +92,9 @@ class AttributionCapture(private val store: AttributionStore, private val analyt
         )
         if (!merged.isEmpty && merged != existing) {
             store.save(merged)
-            analytics?.emit(AnalyticsEvent.AttributionCaptured(merged))
+            // `source` on the wire is the touch kind (link / IRL / company), not the raw campaign tag.
+            (AttributionSource.of(incoming) ?: AttributionSource.of(merged))
+                ?.let { analytics?.emit(AnalyticsEvent.AttributionCaptured(it)) }
         }
         return merged
     }
@@ -105,9 +106,9 @@ class AttributionCapture(private val store: AttributionStore, private val analyt
 }
 
 /**
- * Play Install Referrer seam (D-3 deferred deep linking). The real implementation wraps
- * `com.android.installreferrer.api.InstallReferrerClient`; this interface lets tests replay a
- * referrer string without the Play Store. The referrer string is `utm`-style query params
+ * Play Install Referrer seam (D-3 deferred deep linking). The real implementation will wrap
+ * `com.android.installreferrer.api.InstallReferrerClient` (add the `installreferrer` dependency
+ * with it); this interface lets tests replay a referrer string without the Play Store. The referrer string is `utm`-style query params
  * (`invite=ABC&utm_source=...`), parsed into an Attribution.
  */
 interface InstallReferrer {

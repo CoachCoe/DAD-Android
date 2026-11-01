@@ -10,21 +10,20 @@ package org.dad.foundation
 sealed interface AnalyticsEvent {
     /** The event name sent on the wire (snake_case per §9). */
     val name: String
-    /** Flat property bag; values are strings/numbers/bools only. */
-    val properties: Map<String, Any?>
+    /**
+     * Wire properties, string to string exactly as the ingest endpoint accepts them. DAD-Main's
+     * analytics allow-list rejects any event carrying a key it does not declare, so an event with
+     * no declared property must keep this empty.
+     */
+    val properties: Map<String, String>
 
-    /** D-3/R-3: attribution was captured or updated pre-signup. */
-    data class AttributionCaptured(val attribution: Attribution) : AnalyticsEvent {
+    /** D-3/R-3: attribution was captured or updated pre-signup. Carries only `source`. */
+    data class AttributionCaptured(val source: AttributionSource) : AnalyticsEvent {
         override val name = "attribution_captured"
-        override val properties = mapOf(
-            "has_invite" to (attribution.inviteCode != null),
-            "has_irl" to (attribution.irlCode != null),
-            "has_company" to (attribution.companyCode != null),
-            "source" to attribution.source,
-        )
+        override val properties = mapOf("source" to source.wire)
     }
 
-    /** R-1/R-2: the donor shared their personal invite link (share sheet / copy). */
+    /** R-1/R-2: the donor shared their personal invite link (share sheet / copy). Carries `channel`. */
     data class InviteShared(val channel: String) : AnalyticsEvent {
         override val name = "invite_shared"
         override val properties = mapOf("channel" to channel)
@@ -33,13 +32,28 @@ sealed interface AnalyticsEvent {
     /** R-2: the IRL QR code was shown full-screen for scanning. */
     data object IrlCodeShown : AnalyticsEvent {
         override val name = "irl_code_shown"
-        override val properties = emptyMap<String, Any?>()
+        override val properties = emptyMap<String, String>()
     }
 
-    /** R-3/R-4: a referral converted (first completed gift by a referred donor). */
-    data class ReferralConverted(val inviteCode: String?) : AnalyticsEvent {
+    /** R-3/R-4: a referral converted (first completed gift by a referred donor). Takes no properties. */
+    data object ReferralConverted : AnalyticsEvent {
         override val name = "referral_converted"
-        override val properties = mapOf("has_invite" to (inviteCode != null))
+        override val properties = emptyMap<String, String>()
+    }
+}
+
+/** The closed `source` set the ingest endpoint accepts for `attribution_captured` (case-sensitive). */
+enum class AttributionSource(val wire: String) {
+    LINK("link"), IRL("IRL"), COMPANY("company");
+
+    companion object {
+        /** The touch kind of one attribution payload: an IRL code, else an invite link, else a company code. */
+        fun of(attribution: Attribution): AttributionSource? = when {
+            attribution.irlCode != null -> IRL
+            attribution.inviteCode != null -> LINK
+            attribution.companyCode != null -> COMPANY
+            else -> null
+        }
     }
 }
 

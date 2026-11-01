@@ -33,7 +33,7 @@ jobs:
           java-version: '21'
       - run: echo '3b8a25775a69158b5ad2b1d17a80a88dc7b40a352a73eb27d06c612a7ce68e98  gradle/wrapper/gradle-wrapper.jar' | sha256sum --check
       - run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "emulator" "platforms;android-37.0" "build-tools;36.0.0" "system-images;android-35;google_apis;x86_64"'
-      - run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --warning-mode all
+      - run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleRelease :app:lintRelease --warning-mode all
       - name: Test Compose journeys and Keystore on Android
         run: |
           export PATH="$ANDROID_HOME/platform-tools:$PATH"
@@ -52,4 +52,22 @@ jobs:
           done
           if [ "$READY" != true ]; then cat "$RUNNER_TEMP/emulator.log"; exit 1; fi
           adb shell input keyevent 82
+          for scale in window_animation_scale transition_animation_scale animator_duration_scale; do adb shell settings put global "$scale" 0; done
           ./gradlew :app:connectedDebugAndroidTest
+      - name: Name failing instrumentation tests
+        if: always()
+        run: |
+          shopt -s nullglob
+          for f in app/build/outputs/androidTest-results/connected/debug/TEST-*.xml app/build/outputs/androidTest-results/connected/*/TEST-*.xml; do
+            awk -v file="$f" '/<testcase /{name=$0} /<failure|<error/{print "FAILED: " name " (" file ")"}' "$f"
+          done
+          true
+      - name: Upload instrumentation results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: androidtest-results
+          path: |
+            app/build/outputs/androidTest-results/**
+            app/build/reports/androidTests/**
+          if-no-files-found: ignore

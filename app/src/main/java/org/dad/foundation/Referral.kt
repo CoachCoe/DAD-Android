@@ -1,5 +1,9 @@
 package org.dad.foundation
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
@@ -13,14 +17,14 @@ import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 object Referral {
     /**
      * Build the canonical invite URL for a referral code against the public origin.
-     * Returns null for a malformed origin or a code that fails attribution sanitization, so a
+     * Matches the server route `/r/<code>` (`?via=irl` for the in-person variant). Returns null for a malformed origin or a code that fails attribution sanitization, so a
      * bad code can never produce a sharable-but-broken link.
      */
-    fun inviteLink(publicOrigin: String, code: String): String? {
+    fun inviteLink(publicOrigin: String, code: String, inPerson: Boolean = false): String? {
         val sanitized = Attribution.sanitized(code) ?: return null
         val origin = publicOrigin.trimEnd('/')
         if (!origin.startsWith("https://") || origin.length < "https://a".length) return null
-        return "$origin/invite?ref=$sanitized"
+        return "$origin/r/$sanitized" + if (inPerson) "?via=irl" else ""
     }
 
     /**
@@ -59,5 +63,19 @@ class ReferralShareAction(private val sharer: ReferralSharer, private val analyt
     fun copy(link: String) {
         sharer.copy(link)
         analytics?.emit(AnalyticsEvent.InviteShared("copy"))
+    }
+}
+
+/** The real sharer: the system share sheet for [share] and the clipboard for [copy]. */
+class AndroidReferralSharer(private val context: Context) : ReferralSharer {
+    override fun share(link: String, channel: String) {
+        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, link)
+        try { context.startActivity(Intent.createChooser(send, "Share your invite").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        catch (_: android.content.ActivityNotFoundException) { }
+    }
+
+    override fun copy(link: String) {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Dollar A Day invite", link))
     }
 }
