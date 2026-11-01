@@ -562,6 +562,7 @@ class MainActivity : ComponentActivity() {
                             onPartnerTokenConsumed = { model.partnerTokenConsumed() },
                             onPartnerSignedIn = { model.onPartnerSignedIn() },
                             analytics = model.analytics,
+                            publicOrigin = linkPublicOrigin,
                         )
                     }
                 }

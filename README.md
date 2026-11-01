@@ -229,7 +229,8 @@ A partner signs in with an emailed link: "Partner" on the start screen asks for 
 (`partnerRequestSignIn`); the `/partner/accept#token=` link, opened on the phone or pasted on "Check your email", is
 exchanged for a 12-hour bearer (`partnerAcceptInvite`; a used or expired link is 422, a blocked partner 403). The
 bearer is kept in its own Keystore entry (`partner-session`), cannot be refreshed, and is forgotten on expiry, on a
-401, or on sign-out (local first, then `partnerSignOut`), returning the partner to sign-in.
+401, or on sign-out (local first, then `partnerSignOut`), returning the partner to sign-in. Becoming a partner is a
+website application (`applyWithReceipt`, browser-only), linked from partner sign-in as `<public origin>/apply`.
 
 The portal has four sections. **Overview** shows only verified figures (§7.3; an unverified figure is left out,
 never estimated) and spend by category. **Initiatives** lists the partner's initiatives and their metrics.

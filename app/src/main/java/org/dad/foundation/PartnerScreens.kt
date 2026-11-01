@@ -9,6 +9,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -28,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -51,12 +53,13 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.core.graphics.scale
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import androidx.core.net.toUri
 import java.io.ByteArrayOutputStream
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // Partner sign-in and portal (PRD P-*, EM-*, §7). Approved partner users sign in with an emailed link; the portal
 // shows verified-or-hidden figures (§7.3), the workforce rollup with <5 suppression (EM-3), and the organization
@@ -76,6 +79,8 @@ fun PartnerSignInFlow(
     onTokenConsumed: () -> Unit,
     onBack: () -> Unit,
     onSignedIn: () -> Unit,
+    /** The website's partner application (`<public origin>/apply`); null when no public origin is configured. */
+    applyUrl: String? = null,
 ) {
     LaunchedEffect(incomingToken) {
         val token = incomingToken ?: return@LaunchedEffect
@@ -102,6 +107,13 @@ fun PartnerSignInFlow(
                     if (phase is PartnerSignInPhase.Failed) ErrorLine(phase.message, "partner-sign-in-error")
                     Button(onClick = model::submit, enabled = model.canSubmit, modifier = Modifier.fillMaxWidth().testTag("partner-sign-in-submit")) {
                         Text(if (phase is PartnerSignInPhase.Submitting) "Sending…" else "Email me a sign-in link")
+                    }
+                    if (applyUrl != null) {
+                        val context = LocalContext.current
+                        TextButton(
+                            onClick = { try { CustomTabsIntent.Builder().build().launchUrl(context, applyUrl.toUri()) } catch (_: ActivityNotFoundException) { } },
+                            modifier = Modifier.fillMaxWidth().testTag("partner-apply"),
+                        ) { Text("New partner? Apply on the website") }
                     }
                 }
             }

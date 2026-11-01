@@ -118,6 +118,7 @@ class StubBackendFlowTest {
         launch().use {
             waitFor("role-partner")
             compose.tapSafely("role-partner")
+            waitFor("partner-apply")
             compose.enterText("partner-sign-in-email", "ada@acme.com")
             waitEnabled("partner-sign-in-submit")
             compose.tapSafely("partner-sign-in-submit")

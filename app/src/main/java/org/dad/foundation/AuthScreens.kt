@@ -54,6 +54,8 @@ fun UnauthenticatedStack(
     onPartnerTokenConsumed: () -> Unit = {},
     onPartnerSignedIn: () -> Unit = {},
     analytics: AnalyticsUploader? = null,
+    /** The configured public site; blank where none is configured. */
+    publicOrigin: String = "",
 ) {
     var step by rememberSaveable { mutableStateOf(AuthStep.RoleSelect) }
     LaunchedEffect(partnerToken) { if (partnerToken != null) step = AuthStep.Partner }
@@ -87,6 +89,7 @@ fun UnauthenticatedStack(
             viewModel(key = "partner-sign-in-$generation", factory = PartnerSignInModel.factory(partnerSignIn)),
             incomingToken = partnerToken, onTokenConsumed = onPartnerTokenConsumed,
             onBack = { step = AuthStep.RoleSelect }, onSignedIn = onPartnerSignedIn,
+            applyUrl = publicOrigin.takeIf { it.isNotBlank() }?.let { "${it.trimEnd('/')}/apply" },
         ) else RoleSelect(PhoneSignInModel.NOT_CONFIGURED) { role -> if (role == AppRole.DONOR) step = AuthStep.Methods }
     }
 }
