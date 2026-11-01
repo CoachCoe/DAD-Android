@@ -70,7 +70,7 @@ class CredentialAuthFlowTest {
             fillSignup()
             waitFor("check-email")
             compose.onNodeWithTag("check-email-address").assertIsDisplayed()
-            type("paste-input", "https://stub.invalid/account/claim#token=good" + "A".repeat(40))
+            type("paste-input", "https://stub.invalid/account/claim#token=good" + "A".repeat(40) + "&next=/account/dashboard")
             compose.tapSafely("paste-submit")
             waitFor("open-settings")
         }

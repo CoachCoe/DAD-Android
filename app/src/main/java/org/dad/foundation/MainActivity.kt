@@ -273,7 +273,7 @@ class AccountModel(
             finally {
                 loading = false
                 if (claim != null) {
-                    if (claimed) { completedProof = activeProof; gate.signedIn(); generation++ }
+                    if (claimed) { completedProof = activeProof; gate.signedIn()?.let { destination = it }; generation++ }
                     activeProof = null
                 }
                 pendingProof?.let { pendingProof = null; load(claim = it) }
@@ -318,16 +318,20 @@ class AccountModel(
     fun configurationUnavailable() { hasSession = false; notice = PhoneSignInModel.NOT_CONFIGURED; state = AccountState.Unavailable }
     fun receive(value: String, router: LinkRouter): String? {
         return when (val intent = router.route(value)) {
-            is LinkIntent.Account -> if (intent.destination == AccountDestination.PROFILE) {
+            is LinkIntent.Account -> if (!partnerSignedIn) {
                 gate.receive(intent.destination, state is AccountState.Ready)?.let { destination = it }
                 if (hasSession) load()
                 null
             } else value
             is LinkIntent.Claim -> {
-                if (intent.next != null || (BuildConfig.DAD_API_ORIGIN.isBlank() && !options.stubBackend)) value
+                if (partnerSignedIn || (BuildConfig.DAD_API_ORIGIN.isBlank() && !options.stubBackend)) value
                 else {
                     val digest = java.security.MessageDigest.getInstance("SHA-256").digest(intent.token.toByteArray()).joinToString("") { "%02x".format(it) }
-                    if (activeProof == null && completedProof != digest) { activeProof = digest; load(claim = intent.token) }
+                    if (activeProof == null && completedProof != digest) {
+                        activeProof = digest
+                        intent.next?.let { gate.receive(it, false) }
+                        load(claim = intent.token)
+                    }
                     null
                 }
             }

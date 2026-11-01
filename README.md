@@ -86,8 +86,8 @@ For a real environment, pass `-PdadApiOrigin=https://API_HOST` and
 App-link hooks handle launch and foreground intents using the pinned origin/path policy;
 profile access can wait for sign-in, and plain claim links can establish a session.
 Custom Tabs preserve website behavior for referrals, email changes, and unimplemented
-features. A claim with a web-only return destination stays on the web before consuming
-its one-use proof. Notifications admit only approved relative paths.
+features. Claim links with supported dashboard or payment-method return destinations are claimed
+in-app and open the requested native screen. Notifications admit only approved relative paths.
 
 Production app links require the signing certificate's SHA-256 in a matching
 DAD-Main `assetlinks.json`, plus an HTTPS VIEW intent filter with the verified
