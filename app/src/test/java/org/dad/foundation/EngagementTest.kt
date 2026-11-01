@@ -1,5 +1,6 @@
 package org.dad.foundation
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -152,28 +153,44 @@ class EngagementTest {
         assertEquals("$3,000", spend.categories.first().amountLabel)
     }
 
+    @Test fun topPercentileNeverReadsAboveOneHundred() {
+        assertEquals("Top 100% nationally", RankingStanding(120, null, null).nationalLabel)
+    }
+
     // --- Model state machine ---
     private class FakeEngagementService(
         var optedIn: Boolean = true,
-        var failLoad: Boolean = false,
+        var failLoad: Throwable? = null,
         var failToggle: Boolean = false,
+        var failName: Throwable? = null,
+        var needsName: Boolean = false,
     ) : EngagementService {
-        private fun ranking() = if (optedIn) RankingStanding(92, "Austin", 4) else RankingStanding.optedOut()
+        var loads = 0
+        var cancelOnToggle = false
+        private fun ranking() = if (optedIn) RankingStanding(2, "Austin", 4) else RankingStanding.optedOut()
         override suspend fun snapshot(): EngagementSnapshot {
-            if (failLoad) throw AccountFailure.SignedOut
+            loads++
+            failLoad?.let { throw it }
             return EngagementSnapshot(
-                today = TodayInitiative("park", "Park Cleanup", "Today your \$1 funded a cleanup", listOf(ImpactMetric("Bags", "40"))),
                 impact = ImpactTotals(124_000, 3, 2),
-                streak = Streak(12, atRisk = false),
+                badges = BadgeGrid(listOf(Badge("F", "Founding Donor", "rule", "perk", earned = true, earnedAt = null))),
                 ranking = ranking(),
-                spend = InitiativeSpend(500_000, listOf(SpendCategory("Food", 500_000))),
+                network = NetworkView(5, 348_000, null, emptyList(), 2),
+                referral = if (needsName) null else ReferralInfo("ALEX", 2, 1, emptyList()),
+                needsPublicName = needsName,
             )
         }
         override suspend fun setRankingOptIn(optIn: Boolean): RankingStanding {
+            if (cancelOnToggle) throw CancellationException("cancelled")
             if (failToggle) throw AccountFailure.Unavailable
             optedIn = optIn
             return ranking()
         }
+        override suspend fun choosePublicName(name: String) {
+            failName?.let { throw it }
+            needsName = false
+        }
+        override suspend fun initiativeSpend(id: String) = InitiativeSpend(1_000, listOf(SpendCategory("Food", 1_000)))
     }
 
     @Test fun loadReadySetsSnapshot() = runTest {
@@ -181,35 +198,147 @@ class EngagementTest {
         model.load()
         dispatcher.scheduler.advanceUntilIdle()
         assertEquals(EngagementPhase.Ready, model.phase)
-        assertEquals(12, model.snapshot?.streak?.current)
-        assertFalse(model.snapshot!!.ranking.isOptedOut)
+        assertEquals("$1,240", model.snapshot?.impact?.givenLabel)
+        assertFalse(model.snapshot!!.ranking!!.isOptedOut)
     }
 
     @Test fun loadFailureSurfacesFailedPhase() = runTest {
-        val model = EngagementModel(FakeEngagementService(failLoad = true))
+        val model = EngagementModel(FakeEngagementService(failLoad = AccountFailure.Unavailable))
         model.load()
         dispatcher.scheduler.advanceUntilIdle()
         assertTrue(model.phase is EngagementPhase.Failed)
+        assertFalse(model.signedOut)
+    }
+
+    @Test fun signedOutLoadRaisesTheSignedOutFlag() = runTest {
+        val model = EngagementModel(FakeEngagementService(failLoad = AccountFailure.SignedOut))
+        model.load()
+        dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(model.signedOut)
+    }
+
+    @Test fun aFailedRefreshKeepsTheContentAndShowsANotice() = runTest {
+        val service = FakeEngagementService()
+        val model = EngagementModel(service)
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        service.failLoad = AccountFailure.Unavailable
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(EngagementPhase.Ready, model.phase)
+        assertTrue(model.snapshot != null)
+        assertTrue(model.refreshNotice != null)
+    }
+
+    @Test fun aCancelledRefreshKeepsThePriorState() = runTest {
+        val service = FakeEngagementService()
+        val model = EngagementModel(service)
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        service.failLoad = CancellationException("cancelled")
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(EngagementPhase.Ready, model.phase)
+        assertTrue(model.snapshot != null)
+        assertNull(model.refreshNotice)
     }
 
     @Test fun optOutReplacesRankingInPlace() = runTest {
         val model = EngagementModel(FakeEngagementService(optedIn = true))
-        model.load()
-        dispatcher.scheduler.advanceUntilIdle()
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
         model.setRankingOptIn(false)
         dispatcher.scheduler.advanceUntilIdle()
-        assertTrue(model.snapshot!!.ranking.isOptedOut)
-        // Still Ready — the rest of the snapshot is intact.
+        assertTrue(model.snapshot!!.ranking!!.isOptedOut)
         assertEquals(EngagementPhase.Ready, model.phase)
-        assertEquals(12, model.snapshot?.streak?.current)
+        assertEquals("$1,240", model.snapshot?.impact?.givenLabel)
+        assertNull(model.pendingOptIn)
     }
 
-    @Test fun failedToggleKeepsTheHomeAndShowsAnInlineError() = runTest {
+    @Test fun theToggleFlipsAtOnceAndOptingBackInRestoresTheStanding() = runTest {
+        val model = EngagementModel(FakeEngagementService(optedIn = true))
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        model.setRankingOptIn(false)
+        assertTrue(model.displayedRanking!!.isOptedOut) // flipped before the save answers
+        dispatcher.scheduler.advanceUntilIdle()
+        model.setRankingOptIn(true)
+        assertFalse(model.displayedRanking!!.isOptedOut)
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals("Top 2% nationally", model.displayedRanking!!.nationalLabel)
+    }
+
+    @Test fun failedToggleRevertsAndShowsAnInlineError() = runTest {
         val model = EngagementModel(FakeEngagementService(failToggle = true))
         model.load(); dispatcher.scheduler.advanceUntilIdle()
-        model.setRankingOptIn(false); dispatcher.scheduler.advanceUntilIdle()
+        model.setRankingOptIn(false)
+        assertTrue(model.displayedRanking!!.isOptedOut)
+        dispatcher.scheduler.advanceUntilIdle()
         assertEquals(EngagementPhase.Ready, model.phase)
-        assertFalse(model.snapshot!!.ranking.isOptedOut)
+        assertFalse(model.displayedRanking!!.isOptedOut)
         assertTrue(model.actionError != null)
+    }
+
+    @Test fun aCancelledToggleKeepsTheStandingWithoutAnError() = runTest {
+        val service = FakeEngagementService().apply { cancelOnToggle = true }
+        val model = EngagementModel(service)
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        model.setRankingOptIn(false); dispatcher.scheduler.advanceUntilIdle()
+        assertFalse(model.displayedRanking!!.isOptedOut)
+        assertNull(model.actionError)
+        assertNull(model.pendingOptIn)
+    }
+
+    @Test fun choosingAPublicNameReloadsSoTheInviteAppears() = runTest {
+        val service = FakeEngagementService(needsName = true)
+        val model = EngagementModel(service)
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(model.snapshot!!.needsPublicName)
+        model.choosePublicName("  Alex C.  "); dispatcher.scheduler.advanceUntilIdle()
+        assertFalse(model.snapshot!!.needsPublicName)
+        assertEquals("ALEX", model.snapshot!!.referral?.code)
+        assertEquals(2, service.loads)
+    }
+
+    @Test fun blankOrOverlongNamesAreRefusedLocally() = runTest {
+        val service = FakeEngagementService(needsName = true)
+        val model = EngagementModel(service)
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        model.choosePublicName("   ")
+        assertTrue(model.nameError != null)
+        model.choosePublicName("x".repeat(81))
+        assertTrue(model.nameError != null)
+        assertEquals(1, service.loads)
+    }
+
+    @Test fun rejectedNamesExplainThemselvesAndKeepTheScreen() = runTest {
+        val service = FakeEngagementService(needsName = true, failName = AccountFailure.InvalidInput)
+        val model = EngagementModel(service)
+        model.load(); dispatcher.scheduler.advanceUntilIdle()
+        model.choosePublicName("Alex"); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals("That name can’t be used. Try another.", model.nameError)
+        assertTrue(model.snapshot!!.needsPublicName)
+        assertFalse(model.isSavingName)
+        service.failName = AccountFailure.Forbidden
+        model.choosePublicName("Alex"); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals("Invite links aren’t available for this account.", model.nameError)
+    }
+
+    @Test fun spendModelReadsPublishedUnpublishedAndFailed() = runTest {
+        var failure: Throwable? = null
+        val service = object : EngagementService {
+            override suspend fun snapshot() = throw UnsupportedOperationException()
+            override suspend fun setRankingOptIn(optIn: Boolean) = throw UnsupportedOperationException()
+            override suspend fun choosePublicName(name: String) = throw UnsupportedOperationException()
+            override suspend fun initiativeSpend(id: String): InitiativeSpend {
+                failure?.let { throw it }
+                return InitiativeSpend(500_000, listOf(SpendCategory("Food", 500_000)))
+            }
+        }
+        val ready = InitiativeSpendModel(service, "id"); ready.load(); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals("$5,000", (ready.phase as InitiativeSpendModel.Phase.Ready).spend.totalLabel)
+        failure = AccountFailure.NotFound
+        val none = InitiativeSpendModel(service, "id"); none.load(); dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(InitiativeSpendModel.Phase.Unpublished, none.phase)
+        failure = AccountFailure.Unavailable
+        val failed = InitiativeSpendModel(service, "id"); failed.load(); dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(failed.phase is InitiativeSpendModel.Phase.Failed)
+        failure = AccountFailure.SignedOut
+        val out = InitiativeSpendModel(service, "id"); out.load(); dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(out.signedOut)
     }
 }

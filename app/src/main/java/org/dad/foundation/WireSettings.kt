@@ -19,17 +19,28 @@ class WireSettings(private val product: ProductClient, private val onLocalWipe: 
         snapshot(product.perform { it.create(DonorApi::class.java).profile().requireBody() })
 
     override suspend fun savePreferences(preferences: Preferences): SettingsSnapshot {
-        val body = SavePreferencesRequest(
-            version = preferences.version, referralEmails = preferences.referralEmails, marketingEmails = preferences.marketingEmails,
-            pushReferralConverted = preferences.pushReferralConverted, pushStreakAtRisk = preferences.pushStreakAtRisk,
-            pushStreakMilestone = preferences.pushStreakMilestone, pushStreakLapsed = preferences.pushStreakLapsed,
-            pushBadgeEarned = preferences.pushBadgeEarned, pushEventNearby = preferences.pushEventNearby,
-            pushEventReminder = preferences.pushEventReminder, pushEventPromoted = preferences.pushEventPromoted,
-            rankingsOptedOut = preferences.rankingsOptedOut, networkVisible = preferences.networkVisible,
-            volunteer = preferences.volunteer, pushGiftProcessed = preferences.pushGiftProcessed)
+        val body = preferencesBody(preferences)
         // A stale `version` (409) means the caller must re-read; surfaced as unavailable so the model shows retry.
         return snapshot(product.perform { it.create(DonorApi::class.java).savePreferences(body).requireBody() })
     }
+
+    /**
+     * Saves the whole block like [savePreferences], but a stale `version` (409) stays [AccountFailure.Conflict] and
+     * every other status keeps its own failure ([failureForStatus]), so a caller can re-read and retry once.
+     */
+    internal suspend fun savePreferencesKeepingConflict(preferences: Preferences) {
+        val body = preferencesBody(preferences)
+        product.perform { it.create(DonorApi::class.java).savePreferences(body).successBody() }
+    }
+
+    private fun preferencesBody(preferences: Preferences) = SavePreferencesRequest(
+        version = preferences.version, referralEmails = preferences.referralEmails, marketingEmails = preferences.marketingEmails,
+        pushReferralConverted = preferences.pushReferralConverted, pushStreakAtRisk = preferences.pushStreakAtRisk,
+        pushStreakMilestone = preferences.pushStreakMilestone, pushStreakLapsed = preferences.pushStreakLapsed,
+        pushBadgeEarned = preferences.pushBadgeEarned, pushEventNearby = preferences.pushEventNearby,
+        pushEventReminder = preferences.pushEventReminder, pushEventPromoted = preferences.pushEventPromoted,
+        rankingsOptedOut = preferences.rankingsOptedOut, networkVisible = preferences.networkVisible,
+        volunteer = preferences.volunteer, pushGiftProcessed = preferences.pushGiftProcessed)
 
     override suspend fun deleteAccount() {
         val deleted = product.perform {

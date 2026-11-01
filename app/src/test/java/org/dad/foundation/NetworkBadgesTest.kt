@@ -69,9 +69,7 @@ class NetworkBadgesTest {
     @Test fun fullCatalogueRendersBothStatesAccessibly() {
         // DoD: every badge renders both states accessibly — i.e. a non-blank a11y label and
         // detail line regardless of earned state.
-        val grid = BadgeGrid(badges = PreviewNetworkBadgesService().let { svc ->
-            kotlinx.coroutines.runBlocking { svc.snapshot().grid.badges }
-        })
+        val grid = kotlinx.coroutines.runBlocking { PreviewEngagementService().snapshot().badges!! }
         assertEquals(24, grid.badges.size)
         assertEquals(7, grid.earned.size)
         grid.badges.forEach { badge ->
@@ -83,7 +81,7 @@ class NetworkBadgesTest {
     }
 
     @Test fun previewCatalogueMatchesPrdAppendixA() {
-        val badges = kotlinx.coroutines.runBlocking { PreviewNetworkBadgesService().snapshot().grid.badges }
+        val badges = kotlinx.coroutines.runBlocking { PreviewEngagementService().snapshot().badges!!.badges }
         assertEquals(
             listOf(
                 "Founding Donor", "First Day", "One Week", "One Month", "Hundred", "One Year", "1,000 Days",
@@ -171,74 +169,43 @@ class NetworkBadgesTest {
         assertNull(blank.shareLink)
     }
 
-    // --- Model state machine ---
-    private class FakeService(
-        var failLoad: Boolean = false,
-        var failName: Boolean = false,
-    ) : NetworkBadgesService {
-        var sharing = SharingState(null, null, null)
-        override suspend fun snapshot(): NetworkBadgesSnapshot {
-            if (failLoad) throw AccountFailure.SignedOut
-            return NetworkBadgesSnapshot(
-                network = NetworkView(5, 348_000, NetworkMilestone("Circle of 10", 10, 5), emptyList(), 2),
-                grid = BadgeGrid(listOf(Badge("A", "A", "rule", "perk", earned = false, earnedAt = null))),
-                sharing = sharing,
-            )
-        }
-        override suspend fun choosePublicName(name: String): SharingState {
-            if (failName) throw AccountFailure.Unavailable
-            sharing = SharingState(name, "https://dad.org/r/x", "https://dad.org/r/x/irl")
-            return sharing
-        }
+    // --- Invite (R-1..R-4) ---
+    @Test fun inviteLinksAreBuiltFromTheConfiguredOriginAndServerRoute() {
+        val referral = ReferralInfo("ALEX", linkCount = 2, irlCount = 1, conversions = null)
+        assertEquals("https://dad.org/r/ALEX", referral.link("https://dad.org"))
+        assertEquals("https://dad.org/r/ALEX?via=irl", referral.irlLink("https://dad.org"))
+        assertNull(referral.link("")) // no configured origin: no link, never an invented one
+        assertTrue(referral.shareMessage("https://dad.org").endsWith("https://dad.org/r/ALEX"))
+        assertFalse(referral.shareMessage("").contains("http"))
     }
 
-    @Test fun loadReadySetsSnapshot() = runTest {
-        val model = NetworkBadgesModel(FakeService())
-        model.load()
-        dispatcher.scheduler.advanceUntilIdle()
-        assertEquals(NetworkBadgesPhase.Ready, model.phase)
-        assertEquals(5L, model.snapshot?.network?.activeCount)
-        assertFalse(model.snapshot!!.sharing.isPublic)
+    @Test fun unknownCountsAreNotZero() {
+        assertEquals(3L, ReferralInfo("A", 2, 1, null).totalConverted)
+        assertNull(ReferralInfo("A", null, 1, null).totalConverted)
+        assertNull(ReferralInfo("A", 2, null, null).totalConverted)
     }
 
-    @Test fun loadFailureSurfacesFailedPhase() = runTest {
-        val model = NetworkBadgesModel(FakeService(failLoad = true))
-        model.load()
-        dispatcher.scheduler.advanceUntilIdle()
-        assertTrue(model.phase is NetworkBadgesPhase.Failed)
+    @Test fun conversionKindsAreOpenStrings() {
+        val at = OffsetDateTime.parse("2026-10-20T12:00:00Z")
+        assertEquals("Link", Conversion(at, "LINK").kindLabel)
+        assertEquals("In person", Conversion(at, "IRL").kindLabel)
+        assertEquals("Invite", Conversion(at, "SOMETHING_NEW").kindLabel)
     }
 
-    @Test fun choosingPublicNameMintsLinksInPlace() = runTest {
-        val model = NetworkBadgesModel(FakeService())
-        model.load()
-        dispatcher.scheduler.advanceUntilIdle()
-        assertFalse(model.snapshot!!.sharing.isPublic)
-        model.choosePublicName("Alex C.")
-        dispatcher.scheduler.advanceUntilIdle()
-        assertTrue(model.snapshot!!.sharing.isPublic)
-        assertEquals("https://dad.org/r/x", model.snapshot!!.sharing.shareLink)
-        // Still Ready — the rest of the snapshot is intact.
-        assertEquals(NetworkBadgesPhase.Ready, model.phase)
+    @Test fun perkKeysMapToCopyAndUnknownKeysStillSayThereIsAPerk() {
+        assertEquals("", Badge.perkCopy(""))
+        assertTrue(Badge.perkCopy("FOUNDING_EVENTS").contains("founding"))
+        assertTrue(Badge.perkCopy("MILESTONE_EVENTS").contains("milestone"))
+        assertTrue(Badge.perkCopy("TEAM_CAPTAIN").contains("merch"))
+        assertEquals("Unlocks a member perk", Badge.perkCopy("SOMETHING_NEW"))
     }
 
-    @Test fun blankNameIsIgnored() = runTest {
-        val model = NetworkBadgesModel(FakeService())
-        model.load()
-        dispatcher.scheduler.advanceUntilIdle()
-        model.choosePublicName("   ")
-        dispatcher.scheduler.advanceUntilIdle()
-        // No-op: still anonymous, still Ready.
-        assertFalse(model.snapshot!!.sharing.isPublic)
-        assertEquals(NetworkBadgesPhase.Ready, model.phase)
-    }
-
-    @Test fun failedOptInKeepsThePageAndShowsAnInlineError() = runTest {
-        val model = NetworkBadgesModel(FakeService(failName = true))
-        model.load(); dispatcher.scheduler.advanceUntilIdle()
-        model.choosePublicName("Alex C."); dispatcher.scheduler.advanceUntilIdle()
-        assertEquals(NetworkBadgesPhase.Ready, model.phase)
-        assertFalse(model.snapshot!!.sharing.isPublic)
-        assertTrue(model.actionError != null)
+    @Test fun anonymousReferralsAreCountedNeverNamed() {
+        val net = NetworkView(3, 100, null, listOf(NetworkInvitee("Alex C.", true), NetworkInvitee("Sam R.", false)), 1)
+        assertEquals("giving", net.invitees[0].statusLabel)
+        assertEquals("paused", net.invitees[1].statusLabel)
+        assertEquals("1 person chooses to stay anonymous", net.anonymousStayingLabel)
+        assertNull(NetworkView(1, 0, null, emptyList(), 0).anonymousStayingLabel)
     }
 
     @Test fun inviteOnlyAccessKeysOnServerBadgeCodes() {

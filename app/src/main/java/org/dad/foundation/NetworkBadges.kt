@@ -27,7 +27,10 @@ data class NetworkMilestone(
 data class NetworkInvitee(
     val name: String,
     val active: Boolean,
-)
+) {
+    /** "giving" / "paused": state in text (N-3). */
+    val statusLabel: String get() = if (active) "giving" else "paused"
+}
 
 /**
  * The donor's referral-network view (N-1..N-3). [invitees] are only the people who opted in to
@@ -64,6 +67,14 @@ data class NetworkView(
             anonymousActive <= 0L -> null
             anonymousActive == 1L -> "and 1 more giving anonymously"
             else -> "and $anonymousActive more giving anonymously"
+        }
+
+    /** "2 people choose to stay anonymous", or null when everyone active opted in. */
+    val anonymousStayingLabel: String?
+        get() = when {
+            anonymousActive <= 0L -> null
+            anonymousActive == 1L -> "1 person chooses to stay anonymous"
+            else -> "$anonymousActive people choose to stay anonymous"
         }
 
     /** True once every referral tier is reached (no next milestone). */
@@ -105,6 +116,18 @@ data class Badge(
     companion object {
         /** Server badge codes that confer a perk: Founding Donor, 1,000 Days, Team Captain (B-4). */
         val PERK_GATING_CODES: Set<String> = setOf("F", "1K", "TC")
+
+        /**
+         * Perk copy for the server's perk key (PRD B-4). The key set is open: an unknown, non-empty key
+         * still says the badge carries a perk rather than hiding it, and an empty key means no perk.
+         */
+        fun perkCopy(key: String): String = when (key) {
+            "" -> ""
+            "FOUNDING_EVENTS" -> "Invite-only founding events"
+            "MILESTONE_EVENTS" -> "Invite-only milestone events"
+            "TEAM_CAPTAIN" -> "Invite-only events, a DAD merch item, 48-hour early event booking and opt-in name listing on initiative pages"
+            else -> "Unlocks a member perk"
+        }
     }
 }
 
@@ -131,8 +154,8 @@ data class BadgeGrid(
 
 // MARK: - Sharing visibility (N opt-in / A-5)
 
-/** Longest public name the opt-in field accepts (first name and last initial needs far less). */
-const val MAX_PUBLIC_NAME = 40
+/** Longest public name the server accepts (`saveSharing`: 1..80). */
+const val MAX_PUBLIC_NAME = 80
 
 /**
  * The donor's public sharing state. A null [publicName] means the donor has NOT opted into being
@@ -156,4 +179,41 @@ data class SharingState(
     /** The visibility line, e.g. "Shown as Alex C." or "Giving anonymously". */
     val visibilityLabel: String
         get() = publicName?.takeIf { it.isNotBlank() }?.let { "Shown as $it" } ?: "Giving anonymously"
+}
+
+// MARK: - Invite (R-1..R-4)
+
+/** One referral's first gift. It carries nothing about the referred donor; [kind] is an open string. */
+data class Conversion(val convertedAt: OffsetDateTime, val kind: String) {
+    /** "Link" / "In person"; a kind a newer server adds is shown neutrally rather than dropped. */
+    val kindLabel: String get() = when (kind) {
+        "LINK" -> "Link"
+        "IRL" -> "In person"
+        else -> "Invite"
+    }
+}
+
+/**
+ * The donor's invite: the referral [code] (parsed from the sharing link's `/r/<code>` path) plus the
+ * counts and recent first gifts. A null count or [conversions] means the read failed: unknown, not zero.
+ * Links are always built from the app's configured public origin, never taken from the server.
+ */
+data class ReferralInfo(
+    val code: String,
+    val linkCount: Long?,
+    val irlCount: Long?,
+    val conversions: List<Conversion>?,
+    val hasMoreConversions: Boolean = false,
+) {
+    /** People who have given through the donor's invite, or null when either count is unknown. */
+    val totalConverted: Long? get() = if (linkCount != null && irlCount != null) linkCount + irlCount else null
+
+    /** The text that goes out with the link. */
+    fun shareMessage(publicOrigin: String): String {
+        val base = "Join me on Dollar A Day — give \$1 a day to local causes."
+        return link(publicOrigin)?.let { "$base $it" } ?: base
+    }
+
+    fun link(publicOrigin: String): String? = Referral.inviteLink(publicOrigin, code)
+    fun irlLink(publicOrigin: String): String? = Referral.inviteLink(publicOrigin, code, inPerson = true)
 }
