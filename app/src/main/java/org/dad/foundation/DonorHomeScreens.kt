@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -55,7 +54,9 @@ private fun friendlyDate(value: OffsetDateTime): String = value.toLocalDate().fo
 internal fun HomeCard(tag: String, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Surface(
         modifier = modifier.fillMaxWidth().testTag(tag),
-        shape = RoundedCornerShape(DadTheme.radius("card").takeIf { it.value > 0f } ?: 16.dp),
+        // Card radius comes from the token via MaterialTheme.shapes.medium (radius("card") = 18dp),
+        // so the old takeIf{>0} fallback is no longer needed.
+        shape = MaterialTheme.shapes.medium,
         border = BorderStroke(1.dp, DadTheme.color("line")),
         tonalElevation = 1.dp,
     ) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { content() } }

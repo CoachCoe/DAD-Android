@@ -10,10 +10,18 @@ class ContrastTest {
     }
 
     @Test fun primaryButtonLabelMeetsAA() {
-        // DadPrimaryButton and the Material primary buttons: paper text on brand-ink (light).
-        assertTrue(DadTheme.contrast("paper", "brand-ink") >= 4.5)
-        // Dark theme: Material onPrimary ink-deep text on brand fill.
-        assertTrue(DadTheme.contrast("ink-deep", "brand") >= 4.5)
+        // The web-style primary (DadPrimaryButton + Material primary) is a brand fill with an ink
+        // label in BOTH light and dark: ink-on-brand = 5.11:1, clearing WCAG AA (>= 4.5).
+        val ratio = DadTheme.contrast("ink", "brand")
+        assertTrue("ink-on-brand ratio=$ratio", ratio >= 4.5)
+    }
+
+    @Test fun streakBarFillReadsOnPageBackground() {
+        // The streak bar fills with teal `ok` (orange is identity, not progress). Pin the fill against
+        // the light page background it reads on: paper-on-ok = 4.90:1 (AA). The `ok-ink` outline is a
+        // redundant shape cue (ok-ink-on-ok is only 1.44:1), NOT the accessible signal — the bar's text
+        // contentDescription ("Streak: N of M days") carries state — so it is intentionally not asserted.
+        assertTrue(DadTheme.contrast("paper", "ok") >= 4.5)
     }
 
     @Test fun brandTextOnPageBackgroundMeetsAAInBothThemes() {

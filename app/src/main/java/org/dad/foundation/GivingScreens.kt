@@ -9,15 +9,12 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -87,8 +84,8 @@ private fun StubHostedPage(purpose: HostedHandoff.Purpose, onComplete: () -> Uni
     ) {
         Text("Secure payment page", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
         Text(if (purpose == HostedHandoff.Purpose.START_GIFT) "Pretend checkout for a monthly gift." else "Pretend card update.")
-        DadPrimaryButton("Complete payment", Modifier.testTag("stub-complete"), onComplete)
-        OutlinedButton(onClick = onClose, modifier = Modifier.heightIn(min = 48.dp).testTag("stub-close")) { Text("Close without paying") }
+        DadPrimaryButton("Complete payment", Modifier.testTag("stub-complete")) { onComplete() }
+        DadSecondaryButton("Close without paying", modifier = Modifier.testTag("stub-close")) { onClose() }
     }
 }
 
@@ -98,7 +95,7 @@ fun GiftSummaryCard(model: GivingModel, onManage: () -> Unit) {
     HomeCard("gift-summary-card") {
         Text("Your monthly gift", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
         Text(summaryLine(model), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("gift-summary"))
-        OutlinedButton(onClick = onManage, modifier = Modifier.heightIn(min = 48.dp).testTag("open-gift")) { Text("Manage gift") }
+        DadSecondaryButton("Manage gift", modifier = Modifier.testTag("open-gift")) { onManage() }
     }
 }
 
@@ -129,7 +126,7 @@ fun GiftScreen(model: GivingModel, stubComplete: ((HostedHandoff.Purpose) -> Uni
         modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp).testTag("gift-screen"),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        if (onClose != null) OutlinedButton(onClick = onClose, modifier = Modifier.heightIn(min = 48.dp).testTag("gift-close")) { Text("Close") }
+        if (onClose != null) DadSecondaryButton("Close", modifier = Modifier.testTag("gift-close")) { onClose() }
         Text(
             giftHeading(model.hasLoaded, model.recurring),
             style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading(),
@@ -177,7 +174,7 @@ private fun Status(model: GivingModel) {
         RecurringState.Preparing -> HomeCard("gift-preparing") {
             Text("We’re getting your first gift ready.", style = MaterialTheme.typography.titleMedium)
             Text("It can take a moment after checkout. Refresh to check again.", style = MaterialTheme.typography.bodySmall)
-            OutlinedButton(onClick = { model.load() }, enabled = !model.isBusy, modifier = Modifier.heightIn(min = 48.dp).testTag("gift-refresh")) { Text("Refresh") }
+            DadSecondaryButton("Refresh", modifier = Modifier.testTag("gift-refresh"), enabled = !model.isBusy) { model.load() }
         }
         is RecurringState.Active, is RecurringState.Ending -> HomeCard("gift-status") {
             Text("${formatUsdMinor(state.amountMinorOrNull ?: 0)}/month", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.testTag("gift-monthly"))
@@ -226,27 +223,25 @@ private fun Stepper(model: GivingModel, startsGift: Boolean) {
         Text("${model.selection.monthlyLabel} · charged monthly", style = MaterialTheme.typography.bodyLarge)
         // Wraps rather than squeezing a button to a sliver at large font scales.
         FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = { model.decrement() }, enabled = model.selection.dailyDollars > GiftAmount.MIN_DAILY_DOLLARS && !model.isBusy,
-                modifier = Modifier.heightIn(min = 48.dp).testTag("gift-decrease"),
-            ) { Text("Decrease gift") }
-            Button(
-                onClick = { model.increment() }, enabled = model.selection.dailyDollars < GiftAmount.MAX_DAILY_DOLLARS && !model.isBusy,
-                modifier = Modifier.heightIn(min = 48.dp).testTag("gift-increase"),
-            ) { Text("Increase gift") }
+            // The stepper pair is a connected secondary control; the single filled primary below
+            // (start/save) is the screen's one high-emphasis action.
+            DadSecondaryButton(
+                "Decrease gift",
+                modifier = Modifier.testTag("gift-decrease"),
+                enabled = model.selection.dailyDollars > GiftAmount.MIN_DAILY_DOLLARS && !model.isBusy,
+            ) { model.decrement() }
+            DadSecondaryButton(
+                "Increase gift",
+                modifier = Modifier.testTag("gift-increase"),
+                enabled = model.selection.dailyDollars < GiftAmount.MAX_DAILY_DOLLARS && !model.isBusy,
+            ) { model.increment() }
         }
     }
     DadStreakBar(filled = model.selection.dailyDollars.coerceAtMost(30))
     if (startsGift) {
-        Button(
-            onClick = { model.startGift() }, enabled = !model.isBusy,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("start-gift"),
-        ) { Text("Start a monthly gift") }
+        DadPrimaryButton("Start a monthly gift", Modifier.testTag("start-gift"), enabled = !model.isBusy) { model.startGift() }
     } else {
-        Button(
-            onClick = { model.applySelection() }, enabled = !model.isBusy,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("save-gift"),
-        ) { Text("Save gift") }
+        DadPrimaryButton("Save gift", Modifier.testTag("save-gift"), enabled = !model.isBusy) { model.applySelection() }
     }
 }
 
@@ -256,9 +251,7 @@ private fun PaymentSection(model: GivingModel) {
         Text("Payment method", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
         Text(paymentLine(model.payment), style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("payment-status"))
         if (model.recurring is RecurringState.Active) {
-            OutlinedButton(onClick = { model.updatePayment() }, enabled = !model.isBusy, modifier = Modifier.heightIn(min = 48.dp).testTag("update-payment")) {
-                Text("Update payment method")
-            }
+            DadSecondaryButton("Update payment method", modifier = Modifier.testTag("update-payment"), enabled = !model.isBusy) { model.updatePayment() }
         }
     }
 }
@@ -296,10 +289,10 @@ private fun CancelSection(model: GivingModel, active: RecurringState.Active, con
         Column(Modifier.testTag("cancel-confirm"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Cancel your gift?", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
             Text(CancelCopy.confirmation(active.periodEnd))
-            OutlinedButton(onClick = { model.cancel(); onConfirming(false) }, enabled = !model.isBusy, modifier = Modifier.heightIn(min = 48.dp).testTag("cancel-end")) { Text("End my gift") }
-            Button(onClick = { onConfirming(false) }, modifier = Modifier.heightIn(min = 48.dp).testTag("cancel-keep")) { Text("Keep giving") }
+            DadDestructiveTextButton("End my gift", modifier = Modifier.testTag("cancel-end"), enabled = !model.isBusy) { model.cancel(); onConfirming(false) }
+            DadSecondaryButton("Keep giving", modifier = Modifier.testTag("cancel-keep")) { onConfirming(false) }
         }
     } else {
-        OutlinedButton(onClick = { onConfirming(true) }, enabled = !model.isBusy, modifier = Modifier.heightIn(min = 48.dp).testTag("gift-cancel")) { Text("Cancel gift") }
+        DadSecondaryButton("Cancel gift", modifier = Modifier.testTag("gift-cancel"), enabled = !model.isBusy) { onConfirming(true) }
     }
 }

@@ -1,7 +1,9 @@
 package org.dad.foundation
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -12,7 +14,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -33,11 +37,28 @@ import org.dad.foundation.generated.DADTokens
 object DadTheme {
     /**
      * Resolve a DAD color token by name. Falls back to a visible magenta for an unknown token
-     * so a typo is obvious rather than silently wrong.
+     * so a typo is obvious rather than silently wrong. Some tokens (outline cues like `ghost-line`)
+     * are authored as `rgba(r,g,b,a)` with fractional alpha; `toColorInt` only parses `#rgb`/`#rrggbb`,
+     * so those are decoded here to keep their real token value (and alpha) rather than a magenta fallback.
      */
     fun color(name: String): Color {
-        val hex = DADTokens.color[name] ?: return Color.Magenta
-        return runCatching { Color(hex.toColorInt()) }.getOrElse { Color.Magenta }
+        val raw = DADTokens.color[name] ?: return Color.Magenta
+        parseRgba(raw)?.let { return it }
+        return runCatching { Color(raw.toColorInt()) }.getOrElse { Color.Magenta }
+    }
+
+    /** Decode a `rgba(r,g,b,a)` / `rgb(r,g,b)` token string, or null if it is not that form. */
+    private fun parseRgba(value: String): Color? {
+        val inner = value.trim().removePrefix("rgba").removePrefix("rgb").trim()
+        if (!inner.startsWith("(") || !inner.endsWith(")")) return null
+        val parts = inner.substring(1, inner.length - 1).split(",").map { it.trim() }
+        if (parts.size !in 3..4) return null
+        val r = parts[0].toIntOrNull() ?: return null
+        val g = parts[1].toIntOrNull() ?: return null
+        val b = parts[2].toIntOrNull() ?: return null
+        val a = if (parts.size == 4) parts[3].toFloatOrNull() ?: return null else 1f
+        if (r !in 0..255 || g !in 0..255 || b !in 0..255 || a !in 0f..1f) return null
+        return Color(red = r / 255f, green = g / 255f, blue = b / 255f, alpha = a)
     }
 
     /**
@@ -76,25 +97,79 @@ object DadTheme {
 fun Modifier.dadHeading(): Modifier = semantics { heading() }
 
 /**
- * Primary call-to-action. 48dp minimum target. Paper text on `brand-ink` (5.0:1, WCAG AA); the raw
- * `brand` fill gave only 3.2:1 behind normal-size label text.
+ * Primary call-to-action — the web primary: `brand` fill with an `ink` label (ink-on-brand = 5.11:1,
+ * WCAG AA). Replaces the former `brand-ink` fill + `paper` label; a `paper` label on raw `brand` is
+ * only 3.2:1, so the label is `ink`, not paper. 48dp minimum target. One filled primary per screen.
  */
 @Composable
-fun DadPrimaryButton(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+fun DadPrimaryButton(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) =
+    DadPrimaryButton(text = text, modifier = modifier, enabled = true, onClick = onClick)
+
+/** Primary call-to-action with an explicit enabled state (e.g. a busy/invalid form guard). */
+@Composable
+fun DadPrimaryButton(text: String, modifier: Modifier, enabled: Boolean, onClick: () -> Unit) {
     Button(
         onClick = onClick,
+        enabled = enabled,
         modifier = modifier.fillMaxWidth().heightIn(min = 48.dp),
         shape = RoundedCornerShape(DadTheme.radius("pill")),
         colors = ButtonDefaults.buttonColors(
-            containerColor = DadTheme.color("brand-ink"),
-            contentColor = DadTheme.color("paper"),
+            containerColor = DadTheme.color("brand"),
+            contentColor = DadTheme.color("ink"),
         ),
     ) { Text(text, style = MaterialTheme.typography.labelLarge) }
 }
 
 /**
- * 30-day streak bar. Each filled day carries a shape fill AND the whole bar is labeled for
- * TalkBack with its "N of M days" value — color is never the only signal (PRD §10 / a11y bar).
+ * Secondary action — an outlined, ghost-line "ghost" button. The brand accent label (brand-ink on
+ * paper / brand on ink-deep via [DadTheme.brandAccent]) stays on the page background, never a fill, so
+ * it keeps its AA contrast. 48dp minimum target.
+ */
+@Composable
+fun DadSecondaryButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+    val dark = isSystemInDarkTheme()
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.heightIn(min = 48.dp),
+        shape = RoundedCornerShape(DadTheme.radius("pill")),
+        border = BorderStroke(1.dp, DadTheme.color(if (dark) "ghost-line-dark" else "ghost-line")),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = DadTheme.brandAccent(dark)),
+    ) { Text(text, style = MaterialTheme.typography.labelLarge) }
+}
+
+/** Low-emphasis text action (links-as-buttons). Brand accent label on the page background. 48dp target. */
+@Composable
+fun DadTextButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+    val dark = isSystemInDarkTheme()
+    TextButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.heightIn(min = 48.dp),
+        colors = ButtonDefaults.textButtonColors(contentColor = DadTheme.brandAccent(dark)),
+    ) { Text(text, style = MaterialTheme.typography.labelLarge) }
+}
+
+/**
+ * Destructive text action, drawn in the `fail` token. Colour is never the only signal: the caller's
+ * label must state the destructive intent in words (e.g. "Delete my account"), which this renders as-is.
+ * 48dp target.
+ */
+@Composable
+fun DadDestructiveTextButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+    TextButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.heightIn(min = 48.dp),
+        colors = ButtonDefaults.textButtonColors(contentColor = DadTheme.color("fail")),
+    ) { Text(text, style = MaterialTheme.typography.labelLarge) }
+}
+
+/**
+ * 30-day streak bar. Filled days use the teal `ok` family (fill + `ok-ink` outline), not brand orange:
+ * orange is DAD's identity, not a progress signal. Each filled day carries a shape fill AND the whole
+ * bar is labeled for TalkBack with its "N of M days" value — color is never the only signal (the text
+ * label is the accessible signal; the outline is a redundant shape cue). (PRD §10 / a11y bar.)
  */
 @Composable
 fun DadStreakBar(filled: Int, modifier: Modifier = Modifier, total: Int = 30) {
@@ -114,13 +189,13 @@ fun DadStreakBar(filled: Int, modifier: Modifier = Modifier, total: Int = 30) {
                     .weight(1f)
                     .height(10.dp)
                     .background(
-                        if (isFilled) DadTheme.color("brand") else DadTheme.color("line"),
+                        if (isFilled) DadTheme.color("ok") else DadTheme.color("line"),
                         RoundedCornerShape(2.dp),
                     )
                     .then(
                         // Shape cue (outline) in addition to color for filled segments.
                         if (isFilled) {
-                            Modifier.border(0.5.dp, DadTheme.color("brand-ink"), RoundedCornerShape(2.dp))
+                            Modifier.border(0.5.dp, DadTheme.color("ok-ink"), RoundedCornerShape(2.dp))
                         } else {
                             Modifier
                         },
