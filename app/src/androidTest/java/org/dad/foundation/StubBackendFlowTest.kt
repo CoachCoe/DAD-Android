@@ -53,10 +53,10 @@ class StubBackendFlowTest {
         waitEnabled("send-code")
         compose.tapSafely("send-code")
         waitFor("code-input")
-        compose.enterText("code-input", code)
+        // A complete 6-digit code submits by itself (and hides the keyboard / leaves the screen), so there is
+        // no keyboard to settle and no Verify button left to tap.
+        compose.enterText("code-input", code, settleAfter = false)
         compose.waitForIdle()
-        waitEnabled("verify-code")
-        compose.tapSafely("verify-code")
     }
 
     private fun deleteAccount() {

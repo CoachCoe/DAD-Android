@@ -12,8 +12,8 @@ import org.junit.runner.RunWith
 class AccountPreviewTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
     @Test fun syntheticAccountLoads() {
-        compose.waitUntil(10_000) { compose.onAllNodes(androidx.compose.ui.test.hasText("Welcome, Alex")).fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithText("Welcome, Alex").assertIsDisplayed()
+        compose.waitUntil(10_000) { compose.onAllNodes(androidx.compose.ui.test.hasText("Hi, Alex")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Hi, Alex").assertIsDisplayed()
         compose.onNodeWithText("Preview · Sample account").assertIsDisplayed()
     }
 }
