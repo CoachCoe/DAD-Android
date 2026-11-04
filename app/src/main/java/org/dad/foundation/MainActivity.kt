@@ -452,6 +452,11 @@ class MainActivity : ComponentActivity() {
             },
             stubOpenEngagement = BuildConfig.DEBUG && intent.getBooleanExtra("stub_open_engagement", false),
             stubPartnerSignedIn = BuildConfig.DEBUG && intent.getBooleanExtra("stub_partner_signed_in", false),
+            stubPartnerViewer = BuildConfig.DEBUG && intent.getBooleanExtra("stub_partner_viewer", false),
+            stubApplication = if (!BuildConfig.DEBUG) null else mapOf(
+                "stub_application_pending" to "PENDING", "stub_application_approved" to "APPROVED",
+                "stub_application_rejected" to "REJECTED", "stub_application_unknown" to "UNDER_REVIEW",
+            ).entries.firstOrNull { intent.getBooleanExtra(it.key, false) }?.value,
             stubAnalyticsUnset = BuildConfig.DEBUG && intent.getBooleanExtra("stub_analytics_unset", false),
             stubPush = BuildConfig.DEBUG && intent.getBooleanExtra("stub_push", false),
         )
@@ -504,7 +509,10 @@ class MainActivity : ComponentActivity() {
                             management = WireAccountManagement(ProductClient(origin, session, http)),
                             wallet = WireWalletPass(ProductClient(origin, session, http)),
                             partner = PartnerSession(KeystoreCredentialStore(appContext, "partner-session", refreshable = false)).let {
-                                PartnerKit(it, WirePartnerAuth(origin, it, http), WirePartner(origin, it, http))
+                                // Nothing in the app creates a receipt yet (`applyWithReceipt` is browser-only in the contract), so this
+                                // reads nothing until DAD-Main admits it to the mobile contract.
+                                PartnerKit(it, WirePartnerAuth(origin, it, http), WirePartner(origin, it, http),
+                                    WireApplicationStatus(origin, KeystoreCredentialStore(appContext, "partner-application-receipt", refreshable = false), http))
                             },
                             analytics = analytics,
                             push = WireDonorPush(ProductClient(origin, session, http)),
@@ -609,6 +617,7 @@ class MainActivity : ComponentActivity() {
                             generation = model.generation,
                             onSignedIn = { model.onSignedIn() },
                             partnerSignIn = model.partner?.signIn,
+                            applicationStatus = model.partner?.applicationStatus,
                             partnerToken = model.pendingPartnerToken,
                             onPartnerTokenConsumed = { model.partnerTokenConsumed() },
                             onPartnerSignedIn = { model.onPartnerSignedIn() },

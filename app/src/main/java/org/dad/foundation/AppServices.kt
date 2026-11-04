@@ -23,7 +23,13 @@ class AuthServices(
 )
 
 /** The partner journey: its own 12-hour session, the emailed-link sign-in and the portal. */
-class PartnerKit(val session: PartnerSession, val signIn: PartnerSignInService, val service: PartnerService)
+class PartnerKit(
+    val session: PartnerSession,
+    val signIn: PartnerSignInService,
+    val service: PartnerService,
+    /** Null where no receipt can be read (previews); otherwise reads nothing until the app holds a receipt. */
+    val applicationStatus: ApplicationStatusService? = null,
+)
 
 /** What the composition root hands the UI: the session plus the real (or, in DEBUG only, preview) services on it. */
 class AppServices(
@@ -73,6 +79,10 @@ data class LaunchOptions(
     val stubOpenEngagement: Boolean = false,
     /** Stub backend only: start with a stored partner session so the portal opens at once. */
     val stubPartnerSignedIn: Boolean = false,
+    /** Stub backend only: the partner is a read-only viewer, and the server refuses admin actions with 403. */
+    val stubPartnerViewer: Boolean = false,
+    /** Stub backend only: the status the stub answers for a stored application receipt (null = no receipt kept). */
+    val stubApplication: String? = null,
     /** Stub backend only: the analytics question has not been answered yet (otherwise it starts declined). */
     val stubAnalyticsUnset: Boolean = false,
     /** Stub backend only: a push provider is linked, so the donor registers a token. */

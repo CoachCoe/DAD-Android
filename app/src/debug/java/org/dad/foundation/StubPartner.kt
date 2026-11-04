@@ -3,9 +3,12 @@ package org.dad.foundation
 /**
  * The DEBUG stub backend's partner routes. Partner sign-in links are accepted for tokens starting `goodpartner`
  * (anything else is the server's 422 "invalid or expired"); the portal is an ADMIN at Acme with two users, one
- * unverified figure, an earlier export whose retained PDF has aged out (404), and no logo. Debug source set only.
+ * unverified figure, an earlier export whose retained PDF has aged out (404), and no logo. Like the server, a viewer's
+ * writes and the admin-only exports are 403 whatever the app's own gating does, and removing the signed-in user or the
+ * organization's last admin is 409. A stored application receipt (`stub-receipt-…`) is recognized only when the launch
+ * seeded an [application] status. Debug source set only.
  */
-internal class StubPartner {
+internal class StubPartner(private val viewer: Boolean = false, private val application: String? = null) {
     class Reply(val code: Int, val body: ByteArray, val type: String = "application/json") {
         constructor(code: Int, json: String) : this(code, json.toByteArray())
     }
@@ -31,10 +34,18 @@ internal class StubPartner {
             "POST" to "/donor/partner/accept-invite" ->
                 return if (field("invite").orEmpty().startsWith("goodpartner")) Reply(200, """{"session":"stub-partner-1"}""") else Reply(422, "{}")
         }
+        if (method == "GET" && path == "/donor/partner/application-status") {
+            return if (authorization?.startsWith("Bearer stub-receipt-") == true && application != null) {
+                Reply(200, """{"organization":"Acme Corp","status":${quoted(application)}}""")
+            } else Reply(401, "{}")
+        }
         if (authorization?.startsWith("Bearer stub-partner-") != true) return Reply(401, "{}")
+        val adminOnly = method == "POST" && !path.endsWith("/sign-out") && !path.contains("/push-device") ||
+            path == "/donor/partner/exports" || path.endsWith("report.pdf")
+        if (viewer && adminOnly) return Reply(403, "{}")
         return when (method to path) {
-            "GET" to "/donor/partner/overview" -> Reply(200, """{"user_id":"u1","organization":${quoted(organization)},"description":${quoted(about)},""" +
-                """"role":"ADMIN","company_code":"ACME","committed_minor":5000000,"deployed_minor":3000000,"deployed_percent":60,""" +
+            "GET" to "/donor/partner/overview" -> Reply(200, """{"user_id":"${if (viewer) "u2" else "u1"}","organization":${quoted(organization)},"description":${quoted(about)},""" +
+                """"role":"${if (viewer) "VIEWER" else "ADMIN"}","company_code":"ACME","committed_minor":5000000,"deployed_minor":3000000,"deployed_percent":60,""" +
                 """"people_reached":12400,"employees_enrolled":86,"workforce_size":$workforce,"enrolled_percent":35,""" +
                 """"updated_at":"2026-10-28T10:00:00Z","has_logo":${logo != null},"committed_verified":true,"deployed_verified":false,"people_reached_verified":true}""")
             "GET" to "/donor/partner/initiatives" -> Reply(200, """{"initiatives":[{"id":"i1","title":"Clean Water West","summary":"Wells across 6 counties.",""" +
@@ -88,6 +99,9 @@ internal class StubPartner {
             else -> when {
                 method == "POST" && path.startsWith("/donor/partner/users/") && path.endsWith("/remove") -> {
                     val id = path.removePrefix("/donor/partner/users/").removeSuffix("/remove")
+                    val admins = users.count { it.contains("\"role\":\"ADMIN\"") }
+                    val target = users.firstOrNull { it.contains("\"id\":\"$id\"") }
+                    if (id == "u1" || (target?.contains("\"role\":\"ADMIN\"") == true && admins <= 1)) return Reply(409, "{}")
                     users.removeAll { it.contains("\"id\":\"$id\"") }
                     Reply(200, """{"removed":true}""")
                 }
