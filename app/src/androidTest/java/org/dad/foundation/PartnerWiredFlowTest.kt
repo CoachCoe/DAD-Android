@@ -30,10 +30,18 @@ class PartnerWiredFlowTest {
         return ActivityScenario.launch(intent)
     }
 
+    // On the slow headless CI emulator the Activity's setContent can land after the first probe, so
+    // fetchSemanticsNodes throws "No compose hierarchies found" before the tree attaches. Treat that transient
+    // state as "not yet" and keep waiting, rather than letting it abort the wait on the first frame.
     private fun waitFor(tag: String, timeout: Long = 15_000) =
-        compose.waitUntil(timeout) { compose.onAllNodes(hasTestTag(tag)).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(timeout) {
+            runCatching { compose.onAllNodes(hasTestTag(tag)).fetchSemanticsNodes().isNotEmpty() }.getOrDefault(false)
+        }
 
-    private fun absent(tag: String) = compose.onAllNodes(hasTestTag(tag)).fetchSemanticsNodes().isEmpty()
+    // Before the hierarchy attaches, fetchSemanticsNodes throws rather than returning empty; a node that is not
+    // there yet is, for this helper's purpose, absent.
+    private fun absent(tag: String) =
+        runCatching { compose.onAllNodes(hasTestTag(tag)).fetchSemanticsNodes().isEmpty() }.getOrDefault(true)
 
     private fun openOrganization() {
         waitFor("partner-tab-organization")
