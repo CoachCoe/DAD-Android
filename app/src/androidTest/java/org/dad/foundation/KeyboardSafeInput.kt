@@ -2,8 +2,6 @@ package org.dad.foundation
 
 import android.app.Activity
 import android.view.Choreographer
-import androidx.compose.ui.semantics.SemanticsActions
-import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
@@ -93,23 +91,16 @@ fun ComposeTestRule.tapSafely(tag: String, timeoutMs: Long = 15_000) {
     tapNode(onNodeWithTag(tag), tag)
 }
 
-/** True if the node or any ancestor can scroll (exposes the ScrollBy semantics action). */
-private fun SemanticsNode.hasScrollableAncestor(): Boolean {
-    var current: SemanticsNode? = this
-    while (current != null) {
-        if (current.config.contains(SemanticsActions.ScrollBy)) return true
-        current = current.parent
-    }
-    return false
-}
-
 /** Same safeguards for a node found some other way (e.g. by text). */
 fun ComposeTestRule.tapNode(node: SemanticsNodeInteraction, description: String) {
     // App-shell chrome (the Scaffold TopAppBar back arrow / account avatar and the NavigationBar tabs)
     // is deliberately NOT inside a scrollable container, so performScrollTo there throws "no parent
-    // layout with a Scroll SemanticsAction". Such a node is always on screen, so scroll only when a
-    // scrollable ancestor exists; still assert displayed + clear of the keyboard either way.
-    if (node.fetchSemanticsNode().hasScrollableAncestor()) node.performScrollTo()
+    // layout with a Scroll SemanticsAction". Such chrome is always on screen, so a failed scroll there
+    // is harmless; attempt the scroll and swallow only that failure (same runCatching idiom as
+    // DashboardFlowTest). Reading ScrollBy off the semantics tree to pre-decide missed scrollable text
+    // fields, which skipped the scroll, left the field off-screen and unfocused, and timed out the IME
+    // wait in awaitKeyboardSettled. Still assert displayed + clear of the keyboard either way.
+    runCatching { node.performScrollTo() }
     node.assertIsDisplayed()
     node.assertNotUnderKeyboard(description)
     node.performClick()
