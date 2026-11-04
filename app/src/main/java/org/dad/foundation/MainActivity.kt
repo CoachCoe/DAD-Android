@@ -482,12 +482,13 @@ class MainActivity : ComponentActivity() {
                         session = AccountSession(WireAPI(origin, http), KeystoreCredentialStore(appContext), scope)
                         val attribution = PrefsAttributionStore(appContext)
                         val linkTokens = PrefsLinkTokenStore(appContext)
+                        val milestones = PrefsMilestoneStore(appContext)
                         val credentialAuth = WireCredentialAuth(origin, android.os.Build.MODEL, http)
                         val external = WireExternalSignIn(origin, android.os.Build.MODEL, http)
                         AppServices(
                             session,
                             WireAuth(origin, android.os.Build.MODEL, http),
-                            WireSettings(ProductClient(origin, session, http), onLocalWipe = { attribution.clear(); linkTokens.clear() }),
+                            WireSettings(ProductClient(origin, session, http), onLocalWipe = { attribution.clear(); linkTokens.clear(); milestones.clear() }),
                             signup = credentialAuth,
                             signInLink = credentialAuth,
                             passwordSignIn = credentialAuth,
@@ -687,6 +688,20 @@ private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaun
     // One giving model for the whole signed-in session: the home card, the gift screen and the
     // cancel-before-delete path in Settings all read the same state, so a change shows everywhere at once.
     val giving: GivingModel? = kit?.let { viewModel(key = "giving-${model.generation}", factory = GivingModel.factory(it)) }
+    // Hoisted so the celebration reads the same Founding flag Home shows; the tab passes this instance
+    // down (same key), so Home's own load still runs once.
+    val dash: DashboardModel? = dashboard?.let { viewModel(key = "home-${model.generation}", factory = DashboardModel.factory(it)) }
+    val milestones = remember { PrefsMilestoneStore(context) }
+    val shareMilestone: (String) -> Unit = { line ->
+        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(android.content.Intent.EXTRA_TEXT, line)
+        }
+        try { context.startActivity(android.content.Intent.createChooser(send, "Share")) } catch (_: android.content.ActivityNotFoundException) { }
+    }
+    val celebrating = giving?.celebrating == true
+    // A just-created Founding status has to be fetched; the chip stays absent until the flag is known true.
+    LaunchedEffect(celebrating) { if (celebrating) dash?.load() }
     // Screens swap in and out of this one slot; the holder keeps each one's remembered state (the half-typed
     // delete confirmation in Settings) while another screen is on top.
     val holder = rememberSaveableStateHolder()
@@ -708,7 +723,17 @@ private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaun
     // A pushed screen is modal over the tabs: it shows its own back-arrow app bar and hides the
     // NavigationBar, matching the prior "a pushed screen covers the shell" behaviour.
     val onShell = pushed == null
-    Scaffold(
+    if (giving != null && celebrating) {
+        BackHandler { giving.acknowledgeCelebration() }
+        val amount = giving.selection
+        FirstGiftCelebration(
+            amountMonthly = formatUsdMinor(amount.monthlyMinor) + "/month",
+            amountDaily = "$${amount.dailyDollars} a day",
+            founding = dash?.foundingDonor == true,
+            onInvite = { giving.acknowledgeCelebration(); pushed = null; tab = DonorTab.CIRCLE },
+            onDone = { giving.acknowledgeCelebration() },
+        )
+    } else Scaffold(
         topBar = {
             when (pushed) {
                 Pushed.Settings -> DadBackBar("settings-back", "Back") { pushed = null }
@@ -831,7 +856,8 @@ private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaun
                 }
                 null -> DonorShellTab(
                     tab, model, holder, publicOrigin, context,
-                    service, dashboard, giving, kit, eventsService, engagementService,
+                    service, dashboard, dash, giving, kit, eventsService, engagementService,
+                    milestones, shareMilestone,
                     onSelectTab = { tab = it },
                     onPush = { pushed = it },
                     onOpenSpend = { id, title -> spendTarget = SpendTarget(id, title); pushed = Pushed.Spend },
@@ -863,10 +889,13 @@ private fun DonorShellTab(
     context: android.content.Context,
     service: SettingsService?,
     dashboard: DashboardService?,
+    dash: DashboardModel?,
     giving: GivingModel?,
     kit: GivingKit?,
     eventsService: EventsService?,
     engagementService: EngagementService?,
+    milestones: MilestoneStore,
+    onShareMilestone: (String) -> Unit,
     onSelectTab: (DonorTab) -> Unit,
     onPush: (Pushed) -> Unit,
     onOpenSpend: (String, String) -> Unit,
@@ -874,9 +903,9 @@ private fun DonorShellTab(
     when (tab) {
         DonorTab.HOME -> holder.SaveableStateProvider("home") {
             DonorLanding(model) {
-                if (dashboard != null && model.state is AccountState.Ready) {
+                if (dash != null && model.state is AccountState.Ready) {
                     DonorHome(
-                        viewModel(key = "home-${model.generation}", factory = DashboardModel.factory(dashboard)),
+                        dash,
                         giving = giving,
                         onOpenGift = { onSelectTab(DonorTab.GIVING) },
                         onOpenEvents = if (eventsService != null) ({ onSelectTab(DonorTab.EVENTS) }) else null,
@@ -884,6 +913,8 @@ private fun DonorShellTab(
                         onOpenSpend = if (engagementService != null) ({ id, title -> onOpenSpend(id, title) }) else null,
                         onOpenHistory = { onPush(Pushed.History) },
                         onSignedOut = { model.onSignedOut() },
+                        milestones = milestones,
+                        onShareMilestone = onShareMilestone,
                     )
                 }
             }

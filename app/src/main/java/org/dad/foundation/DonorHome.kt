@@ -1,8 +1,10 @@
 package org.dad.foundation
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.core.content.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -203,6 +205,14 @@ class DashboardModel(private val service: DashboardService) : ViewModel() {
     var signedOut: Boolean by mutableStateOf(false)
         private set
 
+    /** Counts loads whose dashboard result landed, so a screen can react to a fresh read. */
+    var loadsCompleted: Int by mutableIntStateOf(0)
+        private set
+
+    /** Null until a Ready dashboard exists: unknown never reads as "not a founding donor". */
+    val foundingDonor: Boolean? get() =
+        ((phase as? Phase.Ready)?.state as? DashboardState.Ready)?.dashboard?.foundingDonor
+
     private var generation = 0
     private var job: Job? = null
 
@@ -227,6 +237,7 @@ class DashboardModel(private val service: DashboardService) : ViewModel() {
                     if (phase is Phase.Ready) refreshNotice = homeMessage(error) else phase = Phase.Failed(homeMessage(error))
                 },
             )
+            loadsCompleted++
             today.fold(
                 onSuccess = { value -> initiative = if (value == null) InitiativePhase.None else InitiativePhase.Ready(value) },
                 onFailure = { error ->
@@ -398,4 +409,52 @@ class GiftHistoryModel(
             initializer { GiftHistoryModel(service) }
         }
     }
+}
+
+// MARK: - Streak milestones
+
+/** The highest streak milestone the donor has already been shown (or that predates this install). */
+interface MilestoneStore {
+    fun seen(): Long?
+    fun markSeen(milestone: Long)
+    fun clear()
+}
+
+class PrefsMilestoneStore(context: android.content.Context) : MilestoneStore {
+    private val prefs = context.applicationContext.getSharedPreferences("org.dad.milestones", android.content.Context.MODE_PRIVATE)
+
+    override fun seen(): Long? = if (prefs.contains(KEY)) prefs.getLong(KEY, 0) else null
+    override fun markSeen(milestone: Long) { prefs.edit { putLong(KEY, milestone) } }
+    override fun clear() { prefs.edit { clear() } }
+
+    private companion object { const val KEY = "highest_seen" }
+}
+
+class MemoryMilestoneStore(private var value: Long? = null) : MilestoneStore {
+    override fun seen(): Long? = value
+    override fun markSeen(milestone: Long) { value = milestone }
+    override fun clear() { value = null }
+}
+
+/**
+ * The newly crossed milestone to celebrate, or null. The first call seeds the baseline silently so
+ * milestones reached before this feature existed never pop a card; after that only a milestone above
+ * the baseline that the current streak still covers counts.
+ */
+fun pendingMilestone(streak: HomeStreak?, store: MilestoneStore): Long? {
+    val last = streak?.ladder?.lastMilestone ?: return null
+    val baseline = store.seen()
+    if (baseline == null) {
+        store.markSeen(last)
+        return null
+    }
+    return last.takeIf { it > baseline && streak.current >= it }
+}
+
+fun milestoneLine(days: Long): String = when (days) {
+    7L -> "7 days. A full week of aid, on the record."
+    30L -> "30 days. That's a month of aid, on the record."
+    100L -> "100 days. Triple digits, on the record."
+    365L -> "365 days. A full year of aid, on the record."
+    else -> "$days days. Every one on the record."
 }

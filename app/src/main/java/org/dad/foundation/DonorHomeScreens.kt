@@ -26,6 +26,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -74,6 +79,7 @@ fun DonorHome(
     model: DashboardModel, giving: GivingModel? = null, onOpenGift: () -> Unit = {}, onOpenEvents: (() -> Unit)? = null,
     onOpenEngagement: (() -> Unit)? = null, onOpenSpend: ((String, String) -> Unit)? = null,
     onOpenHistory: () -> Unit, onSignedOut: () -> Unit,
+    milestones: MilestoneStore? = null, onShareMilestone: ((String) -> Unit)? = null,
 ) {
     LaunchedEffect(Unit) { model.load(); giving?.load() }
     LaunchedEffect(model.signedOut) { if (model.signedOut) onSignedOut() }
@@ -98,7 +104,7 @@ fun DonorHome(
                 }
                 // PRD-C order: (1) at-risk banner, (2) streak hero, (3) Link|IRL tiles — rendered inside
                 // DashboardCards in that order, with the initiative and the monthly-gift item below.
-                is DashboardState.Ready -> DashboardCards(state.dashboard, onOpenGift = onOpenGift)
+                is DashboardState.Ready -> DashboardCards(state.dashboard, onOpenGift = onOpenGift, milestones = milestones, onShareMilestone = onShareMilestone)
             }
         }
         // (4) Today's initiative.
@@ -209,7 +215,7 @@ private fun InitiativeSkeleton() {
 }
 
 @Composable
-private fun DashboardCards(dashboard: HomeDashboard, onOpenGift: () -> Unit) {
+private fun DashboardCards(dashboard: HomeDashboard, onOpenGift: () -> Unit, milestones: MilestoneStore?, onShareMilestone: ((String) -> Unit)?) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         // (1) At-risk banner — ONLY when the streak is at risk. Colour is never the only signal: a
         // warning glyph (with a contentDescription) + text + the warn-wash token background all carry it.
@@ -220,6 +226,19 @@ private fun DashboardCards(dashboard: HomeDashboard, onOpenGift: () -> Unit) {
         }
         // (2) Streak hero card on ink.
         StreakHeroCard(dashboard)
+        // The baseline is seeded the first time this runs, so existing donors never see a card for a
+        // milestone they reached before it existed. Dismissal is remembered per milestone in the store.
+        if (milestones != null) {
+            val pending = remember(streak, milestones) { pendingMilestone(streak, milestones) }
+            var dismissed by rememberSaveable(pending) { mutableStateOf(false) }
+            if (pending != null && !dismissed) {
+                MilestoneCard(
+                    headline = milestoneLine(pending),
+                    onDismiss = { milestones.markSeen(pending); dismissed = true },
+                    onShare = onShareMilestone?.let { share -> { share(milestoneLine(pending)) } },
+                )
+            }
+        }
         // (3) Link | IRL tiles side by side, equal weight. A null referrals block means the figures are
         // unknown — the tiles show "—"/"Not available", never 0.
         HomeCard("impact-card") {
@@ -267,6 +286,36 @@ private fun ReferralTile(title: String, count: Long?, modifier: Modifier = Modif
     }
     // count==null → pass null so the tile renders "—"; a real 0 shows "0" with the muted hint caption.
     DadStatTile(title = title, value = count?.toString(), caption = caption, modifier = modifier)
+}
+
+/**
+ * A dismissible celebration of a newly crossed streak milestone. Not a dialog and not clickable as a
+ * whole, so the headline and both buttons resolve as their own nodes. Its haptic fires once when the
+ * card first enters, as a response to the milestone being reached.
+ */
+@Composable
+internal fun MilestoneCard(headline: String, onDismiss: () -> Unit, onShare: (() -> Unit)?) {
+    val haptics = rememberDadHaptics()
+    LaunchedEffect(Unit) { haptics.confirm() }
+    Surface(
+        modifier = Modifier.fillMaxWidth().testTag("milestone-card"),
+        shape = MaterialTheme.shapes.medium,
+        color = DadTheme.color("ok-wash"),
+        contentColor = DadTheme.color("ink"),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                headline, style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                DadTextButton("Dismiss", Modifier.testTag("milestone-dismiss"), contentColor = DadTheme.color("ink"), onClick = onDismiss)
+                if (onShare != null) {
+                    DadSecondaryButton("Share", Modifier.testTag("milestone-share"), contentColor = DadTheme.color("ink"), onClick = onShare)
+                }
+            }
+        }
+    }
 }
 
 /** The at-risk banner (S-1): a warn-wash block with a warning glyph, the renewal deadline, and an

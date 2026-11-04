@@ -33,6 +33,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -133,6 +135,20 @@ fun GiftScreen(model: GivingModel, stubComplete: ((HostedHandoff.Purpose) -> Uni
     LaunchedEffect(Unit) { model.load() }
     LaunchedEffect(model.signedOut) { if (model.signedOut) onSignedOut() }
     if (hostedPage(model, stubComplete)) return
+    val haptics = rememberDadHaptics()
+    // Start from the current values so opening the screen on an existing state stays silent; only a
+    // change made while the donor is here buzzes.
+    var confirmedSeen by remember { mutableIntStateOf(model.confirmations) }
+    LaunchedEffect(model.confirmations) {
+        if (model.confirmations > confirmedSeen) haptics.confirm()
+        confirmedSeen = model.confirmations
+    }
+    val needsAttention = (model.recurring as? RecurringState.Active)?.status?.needsPaymentAttention == true
+    var attentionSeen by remember { mutableStateOf(needsAttention) }
+    LaunchedEffect(needsAttention) {
+        if (needsAttention && !attentionSeen) haptics.reject()
+        attentionSeen = needsAttention
+    }
     var confirmingCancel by rememberSaveable { mutableStateOf(false) }
     Column(
         modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp).testTag("gift-screen"),

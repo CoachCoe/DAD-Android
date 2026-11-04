@@ -60,6 +60,32 @@ class DonorHomeModelsTest {
         assertNull(model.refreshNotice)
     }
 
+    @Test fun foundingDonorIsUnknownUntilAReadyDashboardThenFollowsIt() = runTest {
+        var founding = true
+        var fail = false
+        val service = FakeService().apply {
+            dashboardResult = {
+                if (fail) throw AccountFailure.Unavailable
+                DashboardState.Ready((readyDash() as DashboardState.Ready).dashboard.copy(foundingDonor = founding))
+            }
+        }
+        val model = DashboardModel(service)
+        assertNull(model.foundingDonor)
+        assertEquals(0, model.loadsCompleted)
+        model.load(); idle()
+        assertEquals(true, model.foundingDonor)
+        assertEquals(1, model.loadsCompleted)
+        fail = true; founding = false
+        model.load(); idle()
+        assertEquals(true, model.foundingDonor)               // a failed refresh keeps the last known answer
+    }
+
+    @Test fun aPreparingDashboardLeavesFoundingUnknown() = runTest {
+        val model = DashboardModel(FakeService())
+        model.load(); idle()
+        assertNull(model.foundingDonor)
+    }
+
     @Test fun preparingAndNothingInRotationAreStatesNotErrors() = runTest {
         val model = DashboardModel(FakeService())
         model.load(); idle()

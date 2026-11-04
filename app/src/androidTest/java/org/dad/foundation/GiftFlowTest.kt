@@ -90,6 +90,10 @@ class GiftFlowTest {
             waitFor("hosted-page-stub")
             assertTrue(DebugBackend.requestLog.contains("POST /donor/me/recurring/checkout"))
             tap("stub-complete")
+            // The first-gift celebration covers the screen; the stub's founding_donor is true.
+            waitFor("celebration-screen")
+            waitFor("celebration-founding")
+            tap("celebration-done")
             waitFor("gift-monthly")
             compose.onNodeWithTag("gift-monthly").assertTextEquals("$180/month")
             compose.onNodeWithTag("gift-notice").assertTextEquals("Your gift is set up.")

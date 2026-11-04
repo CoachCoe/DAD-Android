@@ -158,7 +158,7 @@ fun DadPrimaryButton(text: String, modifier: Modifier, enabled: Boolean, onClick
  * it keeps its AA contrast. 48dp minimum target.
  */
 @Composable
-fun DadSecondaryButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+fun DadSecondaryButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, contentColor: Color? = null, onClick: () -> Unit) {
     val dark = isSystemInDarkTheme()
     OutlinedButton(
         onClick = onClick,
@@ -166,19 +166,23 @@ fun DadSecondaryButton(text: String, modifier: Modifier = Modifier, enabled: Boo
         modifier = modifier.heightIn(min = 48.dp),
         shape = RoundedCornerShape(DadTheme.radius("pill")),
         border = BorderStroke(1.dp, DadTheme.color(if (dark) "ghost-line-dark" else "ghost-line")),
-        colors = ButtonDefaults.outlinedButtonColors(contentColor = DadTheme.brandAccent(dark)),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = contentColor ?: DadTheme.brandAccent(dark)),
     ) { Text(text, style = MaterialTheme.typography.labelLarge) }
 }
 
-/** Low-emphasis text action (links-as-buttons). Brand accent label on the page background. 48dp target. */
+/**
+ * Low-emphasis text action (links-as-buttons). Brand accent label on the page background. 48dp target.
+ * [contentColor] is for the rare surface that is not the page background (an ink or wash card), where
+ * the page-tuned accent would not contrast.
+ */
 @Composable
-fun DadTextButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+fun DadTextButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, contentColor: Color? = null, onClick: () -> Unit) {
     val dark = isSystemInDarkTheme()
     TextButton(
         onClick = onClick,
         enabled = enabled,
         modifier = modifier.heightIn(min = 48.dp),
-        colors = ButtonDefaults.textButtonColors(contentColor = DadTheme.brandAccent(dark)),
+        colors = ButtonDefaults.textButtonColors(contentColor = contentColor ?: DadTheme.brandAccent(dark)),
     ) { Text(text, style = MaterialTheme.typography.labelLarge) }
 }
 

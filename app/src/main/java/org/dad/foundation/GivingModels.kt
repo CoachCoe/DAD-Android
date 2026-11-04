@@ -1,6 +1,7 @@
 package org.dad.foundation
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
@@ -129,6 +130,14 @@ class GivingModel(
     var signedOut: Boolean by mutableStateOf(false)
         private set
 
+    /** A first gift just settled; the shell shows the celebration until [acknowledgeCelebration]. */
+    var celebrating: Boolean by mutableStateOf(false)
+        private set
+
+    /** Counts confirmed gift starts and saves so the screen can fire a haptic per transition. */
+    var confirmations: Int by mutableIntStateOf(0)
+        private set
+
     private var handoffCounter = 0L
     private val attempts = maxOf(pollAttempts, 1)
 
@@ -150,6 +159,7 @@ class GivingModel(
     fun increment() = setDaily(selection.dailyDollars + 1)
     fun decrement() = setDaily(selection.dailyDollars - 1)
     fun dismissNotice() { notice = null }
+    fun acknowledgeCelebration() { celebrating = false }
 
     /**
      * Load the current recurring gift, the amount offer and the payment-method status, and sync the
@@ -214,6 +224,7 @@ class GivingModel(
                 }
                 readSupporting()
                 notice = "Saved. Your next renewal will be ${formatUsdMinor(currentAmountMinor ?: selection.monthlyMinor)}."
+                confirmations++
                 phase = GivingPhase.Idle
             } catch (cancelled: CancellationException) {
                 abandon()
@@ -297,6 +308,10 @@ class GivingModel(
                 syncSelection()
                 hasLoaded = true
                 notice = outcome(finished.purpose, settled, payment)
+                if (settled && finished.purpose == HostedHandoff.Purpose.START_GIFT) {
+                    celebrating = true
+                    confirmations++
+                }
                 isConfirming = false
             } catch (cancelled: CancellationException) {
                 isConfirming = false
