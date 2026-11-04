@@ -29,6 +29,8 @@ class PartnerKit(
     val service: PartnerService,
     /** Null where no receipt can be read (previews); otherwise reads nothing until the app holds a receipt. */
     val applicationStatus: ApplicationStatusService? = null,
+    /** Submits a partner application natively (`applyWithReceipt`), storing the status receipt; null falls back to the website's form. */
+    val applicationSubmit: PartnerApplicationService? = null,
 )
 
 /** What the composition root hands the UI: the session plus the real (or, in DEBUG only, preview) services on it. */
@@ -83,6 +85,8 @@ data class LaunchOptions(
     val stubPartnerViewer: Boolean = false,
     /** Stub backend only: the status the stub answers for a stored application receipt (null = no receipt kept). */
     val stubApplication: String? = null,
+    /** Stub backend only: how the application submission (`applyWithReceipt`) answers. */
+    val stubApplicationSubmit: StubApplicationSubmit = StubApplicationSubmit.ACCEPTS,
     /** Stub backend only: the analytics question has not been answered yet (otherwise it starts declined). */
     val stubAnalyticsUnset: Boolean = false,
     /** Stub backend only: a push provider is linked, so the donor registers a token. */
@@ -100,3 +104,10 @@ enum class StubEventsScenario { STANDARD, INVITED, FAIL_FIRST, NOT_ELIGIBLE }
 
 /** What the DEBUG stub backend does for the engagement routes. */
 enum class StubEngagementScenario { STANDARD, NO_PUBLIC_NAME, TOGGLE_FAIL, BADGES_DOWN, NETWORK_DOWN, SPEND_UNPUBLISHED }
+
+/**
+ * How the DEBUG stub answers the application submission (`applyWithReceipt`). ACCEPTS: 200, and the receipt then
+ * reads as PENDING. INVALID: 422 every time. THROTTLED: 429 with `Retry-After: 30` and no JSON body, like the
+ * ingress. FAILS_FIRST: the first attempt is recorded but answers 503 (the unconfirmed case); the retry is accepted.
+ */
+enum class StubApplicationSubmit { ACCEPTS, INVALID, THROTTLED, FAILS_FIRST }

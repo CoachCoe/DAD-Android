@@ -8,10 +8,18 @@ package org.dad.foundation
  * organization's last admin is 409. A stored application receipt (`stub-receipt-…`) is recognized only when the launch
  * seeded an [application] status. Debug source set only.
  */
-internal class StubPartner(private val viewer: Boolean = false, private val application: String? = null) {
-    class Reply(val code: Int, val body: ByteArray, val type: String = "application/json") {
-        constructor(code: Int, json: String) : this(code, json.toByteArray())
+internal class StubPartner(
+    private val viewer: Boolean = false,
+    private val application: String? = null,
+    private val applicationSubmit: StubApplicationSubmit = StubApplicationSubmit.ACCEPTS,
+) {
+    class Reply(val code: Int, val body: ByteArray, val type: String = "application/json", val headers: Map<String, String> = emptyMap()) {
+        constructor(code: Int, json: String, headers: Map<String, String> = emptyMap()) : this(code, json.toByteArray(), headers = headers)
     }
+
+    /** Receipts the stub has accepted through `applyWithReceipt`, mapped to the organization they named. */
+    private val submittedReceipts = mutableMapOf<String, String>()
+    private var submitAttempts = 0
 
     private var organization = "Acme Corp"
     private var about = "Doing good together."
@@ -27,17 +35,46 @@ internal class StubPartner(private val viewer: Boolean = false, private val appl
 
     fun handles(path: String) = path.startsWith("/donor/partner/")
 
-    fun answer(method: String, path: String, payload: String, authorization: String?): Reply {
+    fun answer(method: String, path: String, payload: String, authorization: String?, idempotencyKey: String? = null): Reply {
         fun field(key: String) = Regex("\"$key\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").find(payload)?.groupValues?.get(1)
         when (method to path) {
             "POST" to "/donor/partner/sign-in" -> return if (field("email").orEmpty().contains("@")) Reply(202, """{"message":"stub"}""") else Reply(422, "{}")
             "POST" to "/donor/partner/accept-invite" ->
                 return if (field("invite").orEmpty().startsWith("goodpartner")) Reply(200, """{"session":"stub-partner-1"}""") else Reply(422, "{}")
         }
+        if (method == "POST" && path == "/donor/partner/applications") {
+            // Native only: no Authorization, an Idempotency-Key, a 43-char receipt and an organization.
+            val receipt = field("receipt").orEmpty()
+            val organization = Regex("\"application\"\\s*:\\s*\\{[^}]*\"organization\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").find(payload)?.groupValues?.get(1).orEmpty()
+            if (authorization != null || idempotencyKey.isNullOrBlank() || receipt.length != 43 || organization.isEmpty()) return Reply(422, "{}")
+            val attempt = synchronized(this) { ++submitAttempts }
+            return when (applicationSubmit) {
+                StubApplicationSubmit.INVALID -> Reply(422, "{}")
+                StubApplicationSubmit.THROTTLED -> Reply(429, ByteArray(0), headers = mapOf("Retry-After" to "30")) // ingress 429: no JSON body
+                StubApplicationSubmit.FAILS_FIRST -> if (attempt == 1) {
+                    synchronized(this) { submittedReceipts[receipt] = organization }
+                    Reply(503, "{}")
+                } else {
+                    synchronized(this) { submittedReceipts[receipt] = organization }
+                    Reply(200, """{"received":true}""")
+                }
+                StubApplicationSubmit.ACCEPTS -> {
+                    synchronized(this) { submittedReceipts[receipt] = organization }
+                    Reply(200, """{"received":true}""")
+                }
+            }
+        }
         if (method == "GET" && path == "/donor/partner/application-status") {
-            return if (authorization?.startsWith("Bearer stub-receipt-") == true && application != null) {
-                Reply(200, """{"organization":"Acme Corp","status":${quoted(application)}}""")
-            } else Reply(401, "{}")
+            val bearer = authorization?.removePrefix("Bearer ")?.takeIf { authorization.startsWith("Bearer ") }
+            // A receipt submitted this session reads back as PENDING with its organization; a launch-seeded receipt
+            // reads back with the seeded status; anything else is unknown.
+            val submitted = bearer?.let { synchronized(this) { submittedReceipts[it] } }
+            return when {
+                submitted != null -> Reply(200, """{"organization":${quoted(submitted)},"status":"PENDING"}""")
+                bearer?.startsWith("stub-receipt-") == true && application != null ->
+                    Reply(200, """{"organization":"Acme Corp","status":${quoted(application)}}""")
+                else -> Reply(401, "{}")
+            }
         }
         if (authorization?.startsWith("Bearer stub-partner-") != true) return Reply(401, "{}")
         val adminOnly = method == "POST" && !path.endsWith("/sign-out") && !path.contains("/push-device") ||
