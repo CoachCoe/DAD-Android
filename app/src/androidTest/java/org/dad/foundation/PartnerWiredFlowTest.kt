@@ -49,8 +49,18 @@ class PartnerWiredFlowTest {
     }
 
     private fun openApplicantSignIn() {
+        // Under CI load a single role-select tap can be dropped before the screen is interactive, leaving the app
+        // on role-select so the partner email field never appears. Tap, then if the transition did not happen,
+        // tap again — the real wait semantics are kept, only a lost first click is recovered.
         waitFor("role-partner")
-        compose.tapSafely("role-partner")
+        repeat(3) {
+            if (!absent("partner-sign-in-email")) return
+            // Only (re)tap while still on role-select; mid-transition the role button is already gone.
+            if (!absent("role-partner")) compose.tapSafely("role-partner")
+            val reached = runCatching { compose.waitUntil(6_000) { !absent("partner-sign-in-email") } }.isSuccess
+            if (reached) return
+            compose.waitForIdle()
+        }
         waitFor("partner-sign-in-email")
     }
 
