@@ -322,6 +322,40 @@ class GivingModelTest {
         assertEquals(GivingPhase.Idle, model.phase)
     }
 
+    @Test fun onlyASettledStartedGiftCelebratesAndAcknowledgingClearsIt() = runTest {
+        val service = Fake()
+        val model = loaded(service)
+        assertFalse(model.celebrating)
+        model.startGift(); advanceUntilIdle()
+        model.handoffFinished(); advanceUntilIdle()          // never settled: no gift appeared
+        assertFalse(model.celebrating)
+        assertEquals(0, model.confirmations)
+        model.startGift(); advanceUntilIdle()
+        service.state = active
+        model.handoffFinished(); advanceUntilIdle()
+        assertTrue(model.celebrating)
+        assertEquals(1, model.confirmations)
+        model.acknowledgeCelebration()
+        assertFalse(model.celebrating)
+    }
+
+    @Test fun updatingThePaymentMethodNeverCelebrates() = runTest {
+        val service = Fake(active).apply { payment = PaymentMethodState(PaymentMethodState.Kind.APPLIED, periodEnd) }
+        val model = loaded(service)
+        model.updatePayment(); advanceUntilIdle()
+        model.handoffFinished(); advanceUntilIdle()
+        assertFalse(model.celebrating)
+        assertEquals(0, model.confirmations)
+    }
+
+    @Test fun aSavedAmountCountsAsAConfirmation() = runTest {
+        val model = loaded(Fake(active))
+        model.setDaily(10)
+        model.applySelection(); advanceUntilIdle()
+        assertEquals(1, model.confirmations)
+        assertFalse(model.celebrating)
+    }
+
     @Test fun savingTheSameAmountSendsNothing() = runTest {
         val service = Fake(active)
         val model = loaded(service)

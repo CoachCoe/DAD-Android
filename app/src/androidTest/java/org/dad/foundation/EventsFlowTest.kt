@@ -36,9 +36,9 @@ class EventsFlowTest {
             waitFor("events-home")
             compose.onNodeWithTag("events-home").assertIsDisplayed()
             waitFor("open-event-e1")
-            compose.onNodeWithTag("event-start-e1").assertIsDisplayed()
+            compose.onNodeWithTag("event-start-e1").performScrollTo().assertIsDisplayed()
             // The invite-only event carries a visible marker (E-5).
-            compose.onNodeWithTag("invite-only-e3").assertIsDisplayed()
+            compose.onNodeWithTag("invite-only-e3").performScrollTo().assertIsDisplayed()
         }
     }
 

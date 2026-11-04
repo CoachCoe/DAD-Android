@@ -193,3 +193,21 @@ fun giftHeading(hasLoaded: Boolean, recurring: RecurringState): String =
             is RecurringState.Ending -> "Your gift is ending"
         }
     }
+
+/** The preset daily amounts offered as chips; every other whole-dollar amount goes through "Other". */
+object GiftPresets {
+    val DAILY = listOf(1, 3, 5)
+
+    enum class Chip { PRESET_1, PRESET_3, PRESET_5, OTHER }
+
+    /** Other stays selected once picked, and also covers any amount that is not a preset (e.g. an existing $4 gift). */
+    fun selectedChip(dailyDollars: Int, otherPicked: Boolean): Chip {
+        if (otherPicked) return Chip.OTHER
+        return when (dailyDollars) {
+            1 -> Chip.PRESET_1
+            3 -> Chip.PRESET_3
+            5 -> Chip.PRESET_5
+            else -> Chip.OTHER
+        }
+    }
+}

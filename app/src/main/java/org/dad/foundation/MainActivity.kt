@@ -29,7 +29,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
@@ -57,6 +60,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -482,12 +486,13 @@ class MainActivity : ComponentActivity() {
                         session = AccountSession(WireAPI(origin, http), KeystoreCredentialStore(appContext), scope)
                         val attribution = PrefsAttributionStore(appContext)
                         val linkTokens = PrefsLinkTokenStore(appContext)
+                        val milestones = PrefsMilestoneStore(appContext)
                         val credentialAuth = WireCredentialAuth(origin, android.os.Build.MODEL, http)
                         val external = WireExternalSignIn(origin, android.os.Build.MODEL, http)
                         AppServices(
                             session,
                             WireAuth(origin, android.os.Build.MODEL, http),
-                            WireSettings(ProductClient(origin, session, http), onLocalWipe = { attribution.clear(); linkTokens.clear() }),
+                            WireSettings(ProductClient(origin, session, http), onLocalWipe = { attribution.clear(); linkTokens.clear(); milestones.clear() }),
                             signup = credentialAuth,
                             signInLink = credentialAuth,
                             passwordSignIn = credentialAuth,
@@ -687,6 +692,20 @@ private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaun
     // One giving model for the whole signed-in session: the home card, the gift screen and the
     // cancel-before-delete path in Settings all read the same state, so a change shows everywhere at once.
     val giving: GivingModel? = kit?.let { viewModel(key = "giving-${model.generation}", factory = GivingModel.factory(it)) }
+    // Hoisted so the celebration reads the same Founding flag Home shows; the tab passes this instance
+    // down (same key), so Home's own load still runs once.
+    val dash: DashboardModel? = dashboard?.let { viewModel(key = "home-${model.generation}", factory = DashboardModel.factory(it)) }
+    val milestones = remember { PrefsMilestoneStore(context) }
+    val shareMilestone: (String) -> Unit = { line ->
+        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(android.content.Intent.EXTRA_TEXT, line)
+        }
+        try { context.startActivity(android.content.Intent.createChooser(send, "Share")) } catch (_: android.content.ActivityNotFoundException) { }
+    }
+    val celebrating = giving?.celebrating == true
+    // A just-created Founding status has to be fetched; the chip stays absent until the flag is known true.
+    LaunchedEffect(celebrating) { if (celebrating) dash?.load() }
     // Screens swap in and out of this one slot; the holder keeps each one's remembered state (the half-typed
     // delete confirmation in Settings) while another screen is on top.
     val holder = rememberSaveableStateHolder()
@@ -708,7 +727,12 @@ private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaun
     // A pushed screen is modal over the tabs: it shows its own back-arrow app bar and hides the
     // NavigationBar, matching the prior "a pushed screen covers the shell" behaviour.
     val onShell = pushed == null
+    // The celebration is drawn OVER the shell rather than replacing it: leaving composition would re-run
+    // the Gift screen's load on return and wipe its "Your gift is set up." notice. While it shows, the
+    // shell underneath is hidden from accessibility (the opaque Surface already blocks touches).
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
+        modifier = if (giving != null && celebrating) Modifier.clearAndSetSemantics {} else Modifier,
         topBar = {
             when (pushed) {
                 Pushed.Settings -> DadBackBar("settings-back", "Back") { pushed = null }
@@ -831,13 +855,26 @@ private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaun
                 }
                 null -> DonorShellTab(
                     tab, model, holder, publicOrigin, context,
-                    service, dashboard, giving, kit, eventsService, engagementService,
+                    service, dashboard, dash, giving, kit, eventsService, engagementService,
+                    milestones, shareMilestone,
                     onSelectTab = { tab = it },
                     onPush = { pushed = it },
                     onOpenSpend = { id, title -> spendTarget = SpendTarget(id, title); pushed = Pushed.Spend },
                 )
             }
         }
+    }
+    if (giving != null && celebrating) {
+        BackHandler { giving.acknowledgeCelebration() }
+        val amount = giving.selection
+        FirstGiftCelebration(
+            amountMonthly = formatUsdMinor(amount.monthlyMinor) + "/month",
+            amountDaily = "$${amount.dailyDollars} a day",
+            founding = dash?.foundingDonor == true,
+            onInvite = { giving.acknowledgeCelebration(); pushed = null; tab = DonorTab.CIRCLE },
+            onDone = { giving.acknowledgeCelebration() },
+        )
+    }
     }
 
     // The analytics question is asked ONCE, after the first sign-in (moved off the Welcome screen) — the
@@ -863,10 +900,13 @@ private fun DonorShellTab(
     context: android.content.Context,
     service: SettingsService?,
     dashboard: DashboardService?,
+    dash: DashboardModel?,
     giving: GivingModel?,
     kit: GivingKit?,
     eventsService: EventsService?,
     engagementService: EngagementService?,
+    milestones: MilestoneStore,
+    onShareMilestone: (String) -> Unit,
     onSelectTab: (DonorTab) -> Unit,
     onPush: (Pushed) -> Unit,
     onOpenSpend: (String, String) -> Unit,
@@ -874,9 +914,9 @@ private fun DonorShellTab(
     when (tab) {
         DonorTab.HOME -> holder.SaveableStateProvider("home") {
             DonorLanding(model) {
-                if (dashboard != null && model.state is AccountState.Ready) {
+                if (dash != null && model.state is AccountState.Ready) {
                     DonorHome(
-                        viewModel(key = "home-${model.generation}", factory = DashboardModel.factory(dashboard)),
+                        dash,
                         giving = giving,
                         onOpenGift = { onSelectTab(DonorTab.GIVING) },
                         onOpenEvents = if (eventsService != null) ({ onSelectTab(DonorTab.EVENTS) }) else null,
@@ -884,6 +924,8 @@ private fun DonorShellTab(
                         onOpenSpend = if (engagementService != null) ({ id, title -> onOpenSpend(id, title) }) else null,
                         onOpenHistory = { onPush(Pushed.History) },
                         onSignedOut = { model.onSignedOut() },
+                        milestones = milestones,
+                        onShareMilestone = onShareMilestone,
                     )
                 }
             }
@@ -895,6 +937,8 @@ private fun DonorShellTab(
                 sharer = remember { ReferralShareAction(AndroidReferralSharer(context), model.analytics) },
                 onSignedOut = { onSelectTab(DonorTab.HOME); model.onSignedOut() },
                 wallet = model.wallet?.let { viewModel<WalletPassModel>(key = "wallet-${model.generation}", factory = WalletPassModel.factory(it)) },
+
+                inviterName = (model.state as? AccountState.Ready)?.profile?.publicName,
             )
         }
         DonorTab.EVENTS -> if (eventsService != null) holder.SaveableStateProvider("events") {
@@ -904,7 +948,7 @@ private fun DonorShellTab(
             )
         }
         DonorTab.GIVING -> if (giving != null && kit != null) holder.SaveableStateProvider("gift") {
-            GiftScreen(giving, stubComplete = kit.stubComplete, onSignedOut = { onSelectTab(DonorTab.HOME); model.onSignedOut() })
+            GiftScreen(giving, stubComplete = kit.stubComplete, onSignedOut = { onSelectTab(DonorTab.HOME); model.onSignedOut() }, onOpenHistory = if (dashboard != null) ({ onPush(Pushed.History) }) else null)
         }
     }
 }
@@ -1034,50 +1078,58 @@ private fun SettingsContent(
     onCancelGift: (() -> Unit)? = null, management: AccountManagementService? = null, generation: Int = 0, onSignedOut: (() -> Unit)? = null,
     analytics: AnalyticsUploader? = null,
 ) {
-    // Profile header — role is immutable (D-1), ZIP drives streak day rollover.
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(snapshot.profile.email, style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("settings-email"))
-        if (management == null) Text("ZIP: ${snapshot.profile.zipLabel}", style = MaterialTheme.typography.bodySmall)
+    // Sections group the account the way a donor thinks of it; Sign out and Delete sit apart at the bottom so a
+    // routine toggle is never next to a destructive action.
+    SettingsHeading("Profile")
+    // Role is immutable (D-1), ZIP drives streak day rollover. A plain Row, not a ListItem: ListItem always merges
+    // its descendants, which would fold the tagged email text into the row.
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        DadSymbol("person", "", Modifier.clearAndSetSemantics {})
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(snapshot.profile.email, style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("settings-email"))
+            if (management == null) Text("ZIP: ${snapshot.profile.zipLabel}", style = MaterialTheme.typography.bodyMedium)
+        }
     }
     if (management != null) {
         EmailChangeSection(viewModel(key = "email-change-$generation", factory = EmailChangeModel.factory(snapshot.profile.email, management)))
         ProfileDetailsSection(viewModel(key = "details-$generation", factory = ProfileDetailsModel.factory(snapshot.profile, management)))
     }
-
-    // Notification toggles (§6.11) — email then push categories. Payment-failure email is absent
-    // by design (non-toggleable server-side).
+    SettingsHeading("Notifications")
+    // Payment-failure email is absent by design (non-toggleable server-side).
     SettingsToggleSection("Emails", snapshot.preferences.emailToggles, model)
     SettingsToggleSection("Notifications", snapshot.preferences.pushToggles, model)
-
-    // Privacy / participation switches.
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("Privacy", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
-        ToggleRow("Show my ranking", snapshot.preferences.showRanking, "ranking-toggle") {
+    SettingsHeading("Privacy")
+    Column {
+        ToggleRow("Show my ranking", snapshot.preferences.showRanking, "ranking-toggle", "star") {
             model.toggle("rankings_opted_out", !it) // inverted: showing = not opted out
         }
-        ToggleRow("Network visible", snapshot.preferences.networkVisible, "network-toggle") {
+        ToggleRow("Network visible", snapshot.preferences.networkVisible, "network-toggle", "person") {
             model.toggle("network_visible", it)
         }
-        ToggleRow("Volunteer opt-in", snapshot.preferences.volunteer, "volunteer-toggle") {
+        ToggleRow("Volunteer opt-in", snapshot.preferences.volunteer, "volunteer-toggle", "calendar") {
             model.toggle("volunteer", it)
         }
         if (analytics != null) {
-            ToggleRow("Usage analytics", analytics.choice == true, "analytics-toggle") { analytics.choose(it) }
-            Text("First-party only: a temporary journey ID measures signup, sharing and giving. No names, email addresses or " +
-                "payment details are sent.", style = MaterialTheme.typography.bodySmall)
+            ToggleRow("Usage analytics", analytics.choice == true, "analytics-toggle", "shield") { analytics.choose(it) }
         }
     }
-
-    password?.let { PasswordSection(it) }
-
-    if (management != null) {
-        EmployerSection(viewModel(key = "employer-$generation", factory = EmployerModel.factory(management)))
-        SessionsSection(viewModel(key = "sessions-$generation", factory = DeviceSessionsModel.factory(management))) { onSignedOut?.invoke() }
+    if (analytics != null) {
+        Text("First-party only: a temporary journey ID measures signup, sharing and giving. No names, email addresses or " +
+            "payment details are sent.", style = MaterialTheme.typography.bodySmall)
     }
-
-    // Sign out.
+    if (password != null || management != null) SettingsHeading("Security")
+    password?.let { PasswordSection(it) }
+    if (management != null) {
+        SessionsSection(viewModel(key = "sessions-$generation", factory = DeviceSessionsModel.factory(management))) { onSignedOut?.invoke() }
+        SettingsHeading("Account")
+        EmployerSection(viewModel(key = "employer-$generation", factory = EmployerModel.factory(management)))
+    }
+    HorizontalDivider()
     DadSecondaryButton("Sign out", modifier = Modifier.testTag("settings-signout")) { model.signOut() }
-
     // Delete account (store-mandated, §6.12): a typed-word confirm gate, inline.
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("Delete account", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
@@ -1108,21 +1160,25 @@ private fun SettingsContent(
 @Composable
 private fun SettingsToggleSection(title: String, toggles: List<Preferences.Toggle>, model: SettingsModel) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium)
-        toggles.forEach { t -> ToggleRow(t.label, t.value, "pref-${t.key}") { model.toggle(t.key, it) } }
+        Text(title, style = MaterialTheme.typography.titleSmall)
+        toggles.forEach { t -> ToggleRow(t.label, t.value, "pref-${t.key}", "bell") { model.toggle(t.key, it) } }
     }
 }
 
 @Composable
-private fun ToggleRow(label: String, value: Boolean, tag: String, onChange: (Boolean) -> Unit) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().testTag(tag)
-            .toggleable(value = value, role = Role.Switch, onValueChange = onChange),
-    ) {
-        Text(label, modifier = Modifier.weight(1f))
-        Switch(checked = value, onCheckedChange = null)
-    }
+private fun SettingsHeading(title: String) {
+    Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.dadHeading())
 }
 
-
+@Composable
+private fun ToggleRow(label: String, value: Boolean, tag: String, icon: String, onChange: (Boolean) -> Unit) {
+    // Tag and toggle state share one node (the ListItem); the Switch itself is display-only.
+    ListItem(
+        headlineContent = { Text(label) },
+        leadingContent = { DadSymbol(icon, "", Modifier.clearAndSetSemantics {}) },
+        trailingContent = { Switch(checked = value, onCheckedChange = null) },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        modifier = Modifier.fillMaxWidth().testTag(tag)
+            .toggleable(value = value, role = Role.Switch, onValueChange = onChange),
+    )
+}

@@ -180,4 +180,18 @@ class GivingTest {
         assertEquals("Your monthly gift", giftHeading(true, RecurringState.Active("s", 3000, d)))
         assertEquals("Your gift is ending", giftHeading(true, RecurringState.Ending("s", 3000, d, d)))
     }
+
+    // --- presets and long dates ---
+    @Test fun selectedChipFollowsPresetsAndOther() {
+        assertEquals(GiftPresets.Chip.PRESET_1, GiftPresets.selectedChip(1, false))
+        assertEquals(GiftPresets.Chip.PRESET_3, GiftPresets.selectedChip(3, false))
+        assertEquals(GiftPresets.Chip.PRESET_5, GiftPresets.selectedChip(5, false))
+        assertEquals(GiftPresets.Chip.OTHER, GiftPresets.selectedChip(4, false))
+        assertEquals(GiftPresets.Chip.OTHER, GiftPresets.selectedChip(5, true))
+    }
+
+    @Test fun longUsDateSpellsOutTheMonth() {
+        val cal = java.util.Calendar.getInstance().apply { clear(); set(2027, java.util.Calendar.APRIL, 22, 12, 0) }
+        assertEquals("April 22, 2027", longUsDate(cal.time))
+    }
 }
