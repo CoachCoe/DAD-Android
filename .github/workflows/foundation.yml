@@ -51,12 +51,23 @@ jobs:
           "$ANDROID_HOME/emulator/emulator" -avd dad-foundation -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect > "$RUNNER_TEMP/emulator.log" 2>&1 &
           trap 'adb emu kill || true' EXIT
           if ! timeout 120 adb wait-for-device; then cat "$RUNNER_TEMP/emulator.log"; exit 1; fi
-          READY=false
-          for i in $(seq 1 90); do
-            if [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1 ]; then READY=true; break; fi
-            sleep 2
-          done
-          if [ "$READY" != true ]; then cat "$RUNNER_TEMP/emulator.log"; exit 1; fi
+          # Boot gate. sys.boot_completed alone is not enough: the journeys type into fields and wait
+          # (awaitKeyboardSettled) for the soft keyboard's inset to settle, so the IME framework must be
+          # up before tests start. On a slow/cold hosted runner the IME can register seconds after
+          # boot_completed, and a test that types in that window times out (ComposeTimeoutException in
+          # awaitKeyboardSettled). So wait for, in order: boot_completed, the package manager answering,
+          # and a default IME registered AND listed as enabled. Poll on real conditions, never a blind sleep.
+          wait_for() { # <description> <command that prints a non-empty value when ready>
+            for _ in $(seq 1 120); do
+              if [ -n "$(eval "$2" 2>/dev/null | tr -d '\r')" ]; then return 0; fi
+              sleep 2
+            done
+            echo "timed out waiting for $1"; cat "$RUNNER_TEMP/emulator.log"; return 1
+          }
+          wait_for "boot_completed" "adb shell getprop sys.boot_completed | grep -w 1" || exit 1
+          wait_for "package manager" "adb shell pm path android | grep package:" || exit 1
+          wait_for "default IME registered" "adb shell settings get secure default_input_method | grep -v '^null$'" || exit 1
+          wait_for "default IME enabled" "adb shell ime list -s | grep ." || exit 1
           adb shell input keyevent 82
           # The journeys deliberately exercise controls above the software keyboard.
           adb shell settings put secure show_ime_with_hard_keyboard 1
