@@ -17,6 +17,7 @@ import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
@@ -154,7 +155,9 @@ class ScannerFlowTest {
             compose.tapSafely("checkin-scan")
             waitFor("scan-denied-permanent")
             waitFor("scan-open-settings")
-            compose.onNodeWithTag("scan-open-settings").assertIsDisplayed()
+            // The app-shell Scaffold (top app bar + bottom NavigationBar) shortened the content
+            // viewport, so this button can sit just below the fold; scroll it in before asserting.
+            compose.onNodeWithTag("scan-open-settings").performScrollTo().assertIsDisplayed()
             compose.enterText("checkin-code", StubEvents.TOKEN)
             compose.tapSafely("checkin-submit")
             waitFor("checkedin-${StubEvents.LIVE}")

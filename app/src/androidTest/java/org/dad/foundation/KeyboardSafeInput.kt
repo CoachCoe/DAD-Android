@@ -93,7 +93,15 @@ fun ComposeTestRule.tapSafely(tag: String, timeoutMs: Long = 15_000) {
 
 /** Same safeguards for a node found some other way (e.g. by text). */
 fun ComposeTestRule.tapNode(node: SemanticsNodeInteraction, description: String) {
-    node.performScrollTo().assertIsDisplayed()
+    // App-shell chrome (the Scaffold TopAppBar back arrow / account avatar and the NavigationBar tabs)
+    // is deliberately NOT inside a scrollable container, so performScrollTo there throws "no parent
+    // layout with a Scroll SemanticsAction". Such chrome is always on screen, so a failed scroll there
+    // is harmless; attempt the scroll and swallow only that failure (same runCatching idiom as
+    // DashboardFlowTest). Reading ScrollBy off the semantics tree to pre-decide missed scrollable text
+    // fields, which skipped the scroll, left the field off-screen and unfocused, and timed out the IME
+    // wait in awaitKeyboardSettled. Still assert displayed + clear of the keyboard either way.
+    runCatching { node.performScrollTo() }
+    node.assertIsDisplayed()
     node.assertNotUnderKeyboard(description)
     node.performClick()
 }

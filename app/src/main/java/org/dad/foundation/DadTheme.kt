@@ -13,13 +13,18 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -95,6 +100,33 @@ object DadTheme {
 
 /** Marks a title for TalkBack heading navigation. */
 fun Modifier.dadHeading(): Modifier = semantics { heading() }
+
+/**
+ * A top app bar whose only control is a back arrow. The arrow is an [IconButton] (never a filled
+ * button, so a screen keeps its single filled primary) drawn with the "\u2190" glyph — no
+ * `material-icons` dependency is on the classpath, so the glyph is the icon. It carries [backTag]
+ * (the testTag moved off the old inline Close/Back button) and [backDescription] for TalkBack; the
+ * 48dp IconButton is the touch target. Colours come from the theme (no literal Color). [title] is
+ * optional because most screens keep their heading in the body; pass it only where the bar owns it.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DadBackBar(backTag: String, backDescription: String, title: String = "", onBack: () -> Unit) {
+    TopAppBar(
+        title = { if (title.isNotEmpty()) Text(title, modifier = Modifier.dadHeading()) },
+        navigationIcon = {
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = backDescription }.testTag(backTag),
+            ) { Text("\u2190", style = MaterialTheme.typography.headlineSmall) }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = MaterialTheme.colorScheme.background,
+            navigationIconContentColor = MaterialTheme.colorScheme.onBackground,
+            titleContentColor = MaterialTheme.colorScheme.onBackground,
+        ),
+    )
+}
 
 /**
  * Primary call-to-action — the web primary: `brand` fill with an `ink` label (ink-on-brand = 5.11:1,

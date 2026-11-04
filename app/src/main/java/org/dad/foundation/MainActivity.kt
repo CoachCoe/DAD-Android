@@ -19,14 +19,24 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Switch
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.Surface
@@ -611,14 +621,58 @@ private val SpendTargetSaver = androidx.compose.runtime.saveable.Saver<SpendTarg
     restore = { saved -> if (saved.size == 2) SpendTarget(saved[0], saved[1]) else null },
 )
 
-/** The donor shell: the landing, with Settings (sign-out and account deletion) one tap away. */
+/** The four bottom-bar destinations. Each keeps its own retained screen state via the holder. */
+private enum class DonorTab { HOME, CIRCLE, EVENTS, GIVING }
+
+/**
+ * A screen pushed modally over the current tab: one at a time, saved across a configuration change.
+ * Settings and the gift-history record are reached from inside a tab; a Spend drill-in carries the
+ * initiative it opened. The invite QR stays internal to [EngagementHome] (its own `showQr` state), so
+ * it is deliberately NOT a Pushed case here — only its `qr-close` tag moved into that screen.
+ */
+private sealed interface Pushed {
+    data object Settings : Pushed
+    data object History : Pushed
+    data object Gift : Pushed
+    data object Spend : Pushed
+}
+
+private val PushedSaver = androidx.compose.runtime.saveable.Saver<Pushed?, String>(
+    save = { pushed ->
+        when (pushed) {
+            Pushed.Settings -> "settings"
+            Pushed.History -> "history"
+            Pushed.Gift -> "gift"
+            Pushed.Spend -> "spend"
+            null -> ""
+        }
+    },
+    restore = { saved ->
+        when (saved) {
+            "settings" -> Pushed.Settings
+            "history" -> Pushed.History
+            "gift" -> Pushed.Gift
+            "spend" -> Pushed.Spend
+            else -> null
+        }
+    },
+)
+
+/**
+ * The donor shell: a Material 3 [Scaffold] with a bottom [NavigationBar] of four tabs (Home / Circle /
+ * Events / Giving) and a per-destination [TopAppBar]. A hand-rolled, saveable tab + pushed-screen stack
+ * replaces the former boolean flags — Navigation Compose is NOT on the classpath and is not added. Each
+ * tab keeps its own retained state through [rememberSaveableStateHolder], and every per-generation
+ * `viewModel(key=…)` key is unchanged so a session's models are never reused across sign-ins.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaunch: Boolean = false, openEngagementAtLaunch: Boolean = false) {
-    var inSettings by rememberSaveable { mutableStateOf(false) }
-    var inHistory by rememberSaveable { mutableStateOf(false) }
-    var inGift by rememberSaveable { mutableStateOf(openGiftAtLaunch) }
-    var inEvents by rememberSaveable { mutableStateOf(false) }
-    var inEngagement by rememberSaveable { mutableStateOf(openEngagementAtLaunch) }
+    var tab by rememberSaveable { mutableStateOf(if (openGiftAtLaunch) DonorTab.GIVING else if (openEngagementAtLaunch) DonorTab.CIRCLE else DonorTab.HOME) }
+    // The pushed screen over the current tab (or null for the bare tab). Spend also needs the target it
+    // opened, kept in its own saveable alongside the Pushed marker (simplest: two small savers rather than
+    // widening Pushed to carry data, so the existing SpendTargetSaver is reused verbatim).
+    var pushed by rememberSaveable(stateSaver = PushedSaver) { mutableStateOf<Pushed?>(null) }
     var spendTarget by rememberSaveable(stateSaver = SpendTargetSaver) { mutableStateOf<SpendTarget?>(null) }
     val engagementService = model.engagement
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -636,98 +690,223 @@ private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaun
     LaunchedEffect(model.destination, ready) {
         if (!ready) return@LaunchedEffect
         when (model.destination ?: return@LaunchedEffect) {
-            AccountDestination.GIFTS -> inHistory = dashboard != null
-            AccountDestination.PAYMENT_METHOD -> inGift = giving != null
-            AccountDestination.PROFILE -> inSettings = service != null
-            AccountDestination.DASHBOARD -> Unit
+            // A tapped /account/gifts notification lands on Giving and opens the gift-history record.
+            AccountDestination.GIFTS -> { tab = DonorTab.GIVING; if (dashboard != null) pushed = Pushed.History }
+            // Payment-method deep link lands on the Giving tab (GiftScreen hosts the payment method).
+            AccountDestination.PAYMENT_METHOD -> if (giving != null) tab = DonorTab.GIVING
+            // Profile opens Settings over the current tab, as before.
+            AccountDestination.PROFILE -> if (service != null) pushed = Pushed.Settings
+            AccountDestination.DASHBOARD -> tab = DonorTab.HOME
         }
         model.destinationOpened()
     }
-    if (inGift && giving != null) {
-        BackHandler { inGift = false }
-        holder.SaveableStateProvider("gift") {
-            GiftScreen(giving, stubComplete = kit.stubComplete, onClose = { inGift = false }, onSignedOut = { inGift = false; model.onSignedOut() })
-        }
-    } else if (spendTarget != null && engagementService != null) {
-        val target = spendTarget!!
-        holder.SaveableStateProvider("spend") {
-            InitiativeSpendScreen(
-                viewModel(key = "spend-${model.generation}-${target.id}", factory = InitiativeSpendModel.factory(engagementService, target.id)),
-                title = target.title,
-                onClose = { spendTarget = null },
-                onSignedOut = { spendTarget = null; model.onSignedOut() },
-            )
-        }
-    } else if (inEngagement && engagementService != null) {
-        BackHandler { inEngagement = false }
-        holder.SaveableStateProvider("engagement") {
-            EngagementHome(
-                viewModel(key = "engagement-${model.generation}", factory = EngagementModel.factory(engagementService)),
-                publicOrigin = publicOrigin,
-                sharer = remember { ReferralShareAction(AndroidReferralSharer(context), model.analytics) },
-                onClose = { inEngagement = false },
-                onSignedOut = { inEngagement = false; model.onSignedOut() },
-                wallet = model.wallet?.let { viewModel<WalletPassModel>(key = "wallet-${model.generation}", factory = WalletPassModel.factory(it)) },
-            )
-        }
-    } else if (inEvents && eventsService != null) {
-        BackHandler { inEvents = false }
-        holder.SaveableStateProvider("events") {
-            EventsScreen(
-                viewModel(key = "events-${model.generation}", factory = EventsModel.factory(eventsService)),
-                onClose = { inEvents = false },
-                onSignedOut = { inEvents = false; model.onSignedOut() },
-            )
-        }
-    } else if (inHistory && dashboard != null) {
-        BackHandler { inHistory = false }
-        holder.SaveableStateProvider("history") {
-            GiftHistoryScreen(
-                viewModel(key = "history-${model.generation}", factory = GiftHistoryModel.factory(dashboard)),
-                onClose = { inHistory = false },
-                onSignedOut = { inHistory = false; model.onSignedOut() },
-            )
-        }
-    } else if (inSettings && service != null) {
-        BackHandler { inSettings = false }
-        holder.SaveableStateProvider("settings") {
-            SettingsHome(
-                viewModel(key = "settings-${model.generation}", factory = SettingsModel.factory(service)),
-                onBack = { inSettings = false },
-                onSignedOut = { model.onSignedOut() },
-                password = model.passwordSettings?.let { passwordService ->
-                    viewModel<PasswordChangeModel>(key = "password-${model.generation}", factory = PasswordChangeModel.factory(passwordService))
-                },
-                onCancelGift = if (giving != null) ({ inGift = true }) else null,
-                management = model.management,
-                generation = model.generation,
-                analytics = model.analytics,
-            )
-        }
-    } else {
-        holder.SaveableStateProvider("home") {
-            DonorLanding(model, onSettings = if (service != null) ({ inSettings = true }) else null) {
-                if (dashboard != null && model.state is AccountState.Ready) {
-                    DonorHome(
-                        viewModel(key = "home-${model.generation}", factory = DashboardModel.factory(dashboard)),
-                        giving = giving,
-                        onOpenGift = { inGift = true },
-                        onOpenEvents = if (eventsService != null) ({ inEvents = true }) else null,
-                        onOpenEngagement = if (engagementService != null) ({ inEngagement = true }) else null,
-                        onOpenSpend = if (engagementService != null) ({ id, title -> spendTarget = SpendTarget(id, title) }) else null,
-                        onOpenHistory = { inHistory = true },
-                        onSignedOut = { model.onSignedOut() },
+
+    // A pushed screen is modal over the tabs: it shows its own back-arrow app bar and hides the
+    // NavigationBar, matching the prior "a pushed screen covers the shell" behaviour.
+    val onShell = pushed == null
+    Scaffold(
+        topBar = {
+            when (pushed) {
+                Pushed.Settings -> DadBackBar("settings-back", "Back") { pushed = null }
+                Pushed.History -> DadBackBar("history-close", "Back") { pushed = null }
+                // Gift pushed from Settings' cancel-gift: back returns to Settings (carries `gift-close`).
+                Pushed.Gift -> DadBackBar("gift-close", "Back") { pushed = Pushed.Settings }
+                Pushed.Spend -> Unit // InitiativeSpendScreen owns its app bar
+                null -> when (tab) {
+                    DonorTab.HOME -> HomeTopBar(model, onSettings = if (service != null) ({ pushed = Pushed.Settings }) else null)
+                    // The close affordance on a tab returns to Home, preserving the prior close→Home contract.
+                    DonorTab.CIRCLE -> if (engagementService != null) DadBackBar("engagement-close", "Back") { tab = DonorTab.HOME }
+                    DonorTab.EVENTS -> if (eventsService != null) DadBackBar("events-back", "Back") { tab = DonorTab.HOME }
+                    DonorTab.GIVING -> if (giving != null) DadBackBar("gift-close", "Back") { tab = DonorTab.HOME }
+                }
+            }
+        },
+        bottomBar = {
+            if (onShell) {
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = tab == DonorTab.HOME,
+                        onClick = { tab = DonorTab.HOME },
+                        icon = { Text("\u2302") },
+                        label = { Text("Home") },
+                        modifier = Modifier.testTag("tab-home"),
+                    )
+                    NavigationBarItem(
+                        selected = tab == DonorTab.CIRCLE,
+                        onClick = { tab = DonorTab.CIRCLE },
+                        icon = { Text("\u25CE") },
+                        label = { Text("Circle") },
+                        enabled = engagementService != null,
+                        modifier = Modifier.testTag("tab-circle"),
+                    )
+                    NavigationBarItem(
+                        selected = tab == DonorTab.EVENTS,
+                        onClick = { tab = DonorTab.EVENTS },
+                        icon = { Text("\u2605") },
+                        label = { Text("Events") },
+                        enabled = eventsService != null,
+                        modifier = Modifier.testTag("tab-events"),
+                    )
+                    NavigationBarItem(
+                        selected = tab == DonorTab.GIVING,
+                        onClick = { tab = DonorTab.GIVING },
+                        icon = { Text("\u2661") },
+                        label = { Text("Giving") },
+                        enabled = giving != null,
+                        modifier = Modifier.testTag("tab-giving"),
                     )
                 }
+            }
+        },
+    ) { innerPadding ->
+        Box(modifier = Modifier.padding(innerPadding)) {
+            when (pushed) {
+                Pushed.Settings -> if (service != null) {
+                    BackHandler { pushed = null }
+                    holder.SaveableStateProvider("settings") {
+                        SettingsHome(
+                            viewModel(key = "settings-${model.generation}", factory = SettingsModel.factory(service)),
+                            onBack = { pushed = null },
+                            onSignedOut = { model.onSignedOut() },
+                            password = model.passwordSettings?.let { passwordService ->
+                                viewModel<PasswordChangeModel>(key = "password-${model.generation}", factory = PasswordChangeModel.factory(passwordService))
+                            },
+                            // Cancel-gift from Settings pushes the Gift screen OVER Settings, so its close
+                            // returns here (not Home) with the half-typed delete confirm intact.
+                            onCancelGift = if (giving != null) ({ pushed = Pushed.Gift }) else null,
+                            management = model.management,
+                            generation = model.generation,
+                            analytics = model.analytics,
+                        )
+                    }
+                }
+                Pushed.History -> if (dashboard != null) {
+                    BackHandler { pushed = null }
+                    holder.SaveableStateProvider("history") {
+                        GiftHistoryScreen(
+                            viewModel(key = "history-${model.generation}", factory = GiftHistoryModel.factory(dashboard)),
+                            onClose = { pushed = null },
+                            onSignedOut = { pushed = null; model.onSignedOut() },
+                        )
+                    }
+                }
+                Pushed.Gift -> if (giving != null) {
+                    // Pushed from Settings' cancel-gift: back returns to Settings.
+                    BackHandler { pushed = Pushed.Settings }
+                    holder.SaveableStateProvider("gift") {
+                        GiftScreen(giving, stubComplete = kit.stubComplete, onClose = { pushed = Pushed.Settings }, onSignedOut = { pushed = null; model.onSignedOut() })
+                    }
+                }
+                Pushed.Spend -> {
+                    val target = spendTarget
+                    if (target != null && engagementService != null) {
+                        BackHandler { pushed = null; spendTarget = null }
+                        holder.SaveableStateProvider("spend") {
+                            InitiativeSpendScreen(
+                                viewModel(key = "spend-${model.generation}-${target.id}", factory = InitiativeSpendModel.factory(engagementService, target.id)),
+                                title = target.title,
+                                onClose = { pushed = null; spendTarget = null },
+                                onSignedOut = { pushed = null; spendTarget = null; model.onSignedOut() },
+                            )
+                        }
+                    }
+                }
+                null -> DonorShellTab(
+                    tab, model, holder, publicOrigin, context,
+                    service, dashboard, giving, kit, eventsService, engagementService,
+                    onSelectTab = { tab = it },
+                    onPush = { pushed = it },
+                    onOpenSpend = { id, title -> spendTarget = SpendTarget(id, title); pushed = Pushed.Spend },
+                )
             }
         }
     }
 }
 
+/** The bare tab body (no pushed screen). Split out to keep [DonorShell] readable. */
+@Composable
+private fun DonorShellTab(
+    tab: DonorTab,
+    model: AccountModel,
+    holder: androidx.compose.runtime.saveable.SaveableStateHolder,
+    publicOrigin: String,
+    context: android.content.Context,
+    service: SettingsService?,
+    dashboard: DashboardService?,
+    giving: GivingModel?,
+    kit: GivingKit?,
+    eventsService: EventsService?,
+    engagementService: EngagementService?,
+    onSelectTab: (DonorTab) -> Unit,
+    onPush: (Pushed) -> Unit,
+    onOpenSpend: (String, String) -> Unit,
+) {
+    when (tab) {
+        DonorTab.HOME -> holder.SaveableStateProvider("home") {
+            DonorLanding(model) {
+                if (dashboard != null && model.state is AccountState.Ready) {
+                    DonorHome(
+                        viewModel(key = "home-${model.generation}", factory = DashboardModel.factory(dashboard)),
+                        giving = giving,
+                        onOpenGift = { onSelectTab(DonorTab.GIVING) },
+                        onOpenEvents = if (eventsService != null) ({ onSelectTab(DonorTab.EVENTS) }) else null,
+                        onOpenEngagement = if (engagementService != null) ({ onSelectTab(DonorTab.CIRCLE) }) else null,
+                        onOpenSpend = if (engagementService != null) ({ id, title -> onOpenSpend(id, title) }) else null,
+                        onOpenHistory = { onPush(Pushed.History) },
+                        onSignedOut = { model.onSignedOut() },
+                    )
+                }
+            }
+        }
+        DonorTab.CIRCLE -> if (engagementService != null) holder.SaveableStateProvider("engagement") {
+            EngagementHome(
+                viewModel(key = "engagement-${model.generation}", factory = EngagementModel.factory(engagementService)),
+                publicOrigin = publicOrigin,
+                sharer = remember { ReferralShareAction(AndroidReferralSharer(context), model.analytics) },
+                onSignedOut = { onSelectTab(DonorTab.HOME); model.onSignedOut() },
+                wallet = model.wallet?.let { viewModel<WalletPassModel>(key = "wallet-${model.generation}", factory = WalletPassModel.factory(it)) },
+            )
+        }
+        DonorTab.EVENTS -> if (eventsService != null) holder.SaveableStateProvider("events") {
+            EventsScreen(
+                viewModel(key = "events-${model.generation}", factory = EventsModel.factory(eventsService)),
+                onSignedOut = { onSelectTab(DonorTab.HOME); model.onSignedOut() },
+            )
+        }
+        DonorTab.GIVING -> if (giving != null && kit != null) holder.SaveableStateProvider("gift") {
+            GiftScreen(giving, stubComplete = kit.stubComplete, onSignedOut = { onSelectTab(DonorTab.HOME); model.onSignedOut() })
+        }
+    }
+}
+
+/** The Home top app bar: the title and the account avatar (opens Settings) in the actions slot. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HomeTopBar(model: AccountModel, onSettings: (() -> Unit)?) {
+    TopAppBar(
+        title = { Text("DAD", modifier = Modifier.dadHeading()) },
+        actions = {
+            if (onSettings != null) {
+                val initial = ((model.state as? AccountState.Ready)?.profile?.publicName?.trim()?.firstOrNull()
+                    ?: 'A').uppercaseChar().toString()
+                IconButton(
+                    onClick = onSettings,
+                    modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "Account and settings" }.testTag("open-settings"),
+                ) { Text(initial, style = MaterialTheme.typography.titleMedium) }
+            }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = MaterialTheme.colorScheme.background,
+            titleContentColor = MaterialTheme.colorScheme.onBackground,
+            actionIconContentColor = MaterialTheme.colorScheme.onBackground,
+        ),
+    )
+}
+
 /** The signed-in donor landing. Carries the exact copy the app has shown since the preview
  * shell, so the role-aware root is a structural change, not a visible one. */
 @Composable
-private fun DonorLanding(model: AccountModel, onSettings: (() -> Unit)? = null, home: @Composable () -> Unit = {}) {
+private fun DonorLanding(model: AccountModel, home: @Composable () -> Unit = {}) {
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.Center) {
         Text("DAD", style = MaterialTheme.typography.displayMedium, modifier = Modifier.dadHeading())
         Spacer(Modifier.height(16.dp))
@@ -748,12 +927,8 @@ private fun DonorLanding(model: AccountModel, onSettings: (() -> Unit)? = null, 
                 AccountState.SignedOut -> Text("You’re signed out.")
             }
         }
-        // Settings hosts sign-out and the store-mandated in-app account deletion, so it is reachable
-        // whenever the donor is signed in, including while the profile read is retrying.
-        if (onSettings != null) {
-            Spacer(Modifier.height(20.dp))
-            DadSecondaryButton("Settings", modifier = Modifier.testTag("open-settings")) { onSettings() }
-        }
+        // Settings (sign-out and the store-mandated in-app account deletion) is reachable from the
+        // account avatar in the Home top app bar, so the donor can open it from any account sub-state.
         Spacer(Modifier.height(20.dp))
         home()
         Spacer(Modifier.height(28.dp))
@@ -785,7 +960,6 @@ private fun SettingsHome(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("Settings", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
-        if (onBack != null && !model.signedOut) DadSecondaryButton("Back", modifier = Modifier.testTag("settings-back")) { onBack() }
         if (model.signedOut) {
             Text("You're signed out.", modifier = Modifier.testTag("settings-signed-out"))
             return@Column
