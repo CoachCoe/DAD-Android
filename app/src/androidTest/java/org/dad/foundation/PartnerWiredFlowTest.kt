@@ -108,20 +108,20 @@ class PartnerWiredFlowTest {
         }
     }
 
-    @Test fun anApprovedAndARejectedApplicationSaySoAndAnUnknownStateIsGeneric() {
-        mapOf(
-            "stub_application_approved" to "is approved",
-            "stub_application_rejected" to "wasn’t approved",
-            "stub_application_unknown" to "Check back soon",
-        ).forEach { (extra, text) ->
-            launch(extra).use {
-                openApplicantSignIn()
-                waitFor("partner-application-status")
-                compose.onNodeWithTag("partner-application-message").assertTextContains(text, substring = true)
-                assertTrue(absent("partner-application-error"))
-            }
+    private fun applicationShows(extra: String, text: String) {
+        launch(extra).use {
+            openApplicantSignIn()
+            waitFor("partner-application-status")
+            compose.onNodeWithTag("partner-application-message").assertTextContains(text, substring = true)
+            assertTrue(absent("partner-application-error"))
         }
     }
+
+    @Test fun anApprovedApplicationSaysSo() = applicationShows("stub_application_approved", "is approved")
+
+    @Test fun aRejectedApplicationSaysSo() = applicationShows("stub_application_rejected", "wasn’t approved")
+
+    @Test fun anUnknownApplicationStateIsGeneric() = applicationShows("stub_application_unknown", "Check back soon")
 
     @Test fun withoutAReceiptThereIsNoApplicationCard() {
         launch().use {
