@@ -189,11 +189,13 @@ fun DadTextButton(text: String, modifier: Modifier = Modifier, enabled: Boolean 
  */
 @Composable
 fun DadDestructiveTextButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+    // `fail` on ink-deep is under AA, so dark uses the lighter fail-line (ContrastTest pins both).
+    val dark = isSystemInDarkTheme()
     TextButton(
         onClick = onClick,
         enabled = enabled,
         modifier = modifier.heightIn(min = 48.dp),
-        colors = ButtonDefaults.textButtonColors(contentColor = DadTheme.color("fail")),
+        colors = ButtonDefaults.textButtonColors(contentColor = DadTheme.color(if (dark) "fail-line" else "fail")),
     ) { Text(text, style = MaterialTheme.typography.labelLarge) }
 }
 

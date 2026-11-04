@@ -904,7 +904,7 @@ private fun DonorShellTab(
             )
         }
         DonorTab.GIVING -> if (giving != null && kit != null) holder.SaveableStateProvider("gift") {
-            GiftScreen(giving, stubComplete = kit.stubComplete, onSignedOut = { onSelectTab(DonorTab.HOME); model.onSignedOut() })
+            GiftScreen(giving, stubComplete = kit.stubComplete, onSignedOut = { onSelectTab(DonorTab.HOME); model.onSignedOut() }, onOpenHistory = if (dashboard != null) ({ onPush(Pushed.History) }) else null)
         }
     }
 }

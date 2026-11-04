@@ -83,8 +83,9 @@ class GiftFlowTest {
             waitFor("start-gift")
             waitFor("gift-none")
             // Pick $6 a day, then start: the app sends the amount and opens the (stubbed) hosted page.
+            tap("gift-chip-other")
             repeat(5) { tap("gift-increase") }
-            compose.onNodeWithTag("gift-daily").assertTextEquals("$6/day")
+            compose.onNodeWithTag("gift-daily").assertTextEquals("$6 a day")
             tap("start-gift")
             waitFor("hosted-page-stub")
             assertTrue(DebugBackend.requestLog.contains("POST /donor/me/recurring/checkout"))
@@ -117,7 +118,8 @@ class GiftFlowTest {
             openGift()
             waitFor("gift-monthly")
             compose.onNodeWithTag("gift-monthly").assertTextEquals("$150/month")
-            compose.onNodeWithTag("gift-daily").assertTextEquals("$5/day")
+            compose.onNodeWithTag("gift-daily").assertTextEquals("$5 a day")
+            tap("gift-chip-other")
             tap("gift-increase")
             tap("save-gift")
             waitFor("gift-notice")

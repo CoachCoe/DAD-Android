@@ -439,6 +439,9 @@ class GivingModel(
 /** "Dec 15, 2026" in the device's time zone. */
 internal fun shortDate(date: Date): String = DateFormat.getDateInstance(DateFormat.MEDIUM).format(date)
 
+/** "April 22, 2027": the spelled-out US form, in the device's time zone. */
+internal fun longUsDate(date: Date): String = DateFormat.getDateInstance(DateFormat.LONG, java.util.Locale.US).format(date)
+
 /**
  * In-app preview/test double for [GivingService]: starts with an active $1/day gift so the gift and
  * cancel surfaces both render without a network. [complete] plays the hosted page finishing.

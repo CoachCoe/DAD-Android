@@ -59,4 +59,12 @@ class ContrastTest {
         assertTrue(DadTheme.contrast("dkmut", "ink") >= 4.5)
         assertTrue(DadTheme.contrast("ink", "brand") >= 4.5)
     }
+
+    @Test fun destructiveAndWashPairsMeetAA() {
+        assertTrue(DadTheme.contrast("fail", "paper") >= 4.5)
+        assertTrue(DadTheme.contrast("fail-line", "ink-deep") >= 4.5)
+        assertTrue(DadTheme.contrast("ink", "ok-wash") >= 4.5)
+        assertTrue(DadTheme.contrast("ok-ink", "ok-wash") >= 4.5)
+        assertTrue(DadTheme.contrast("ink", "brand-wash") >= 4.5)
+    }
 }

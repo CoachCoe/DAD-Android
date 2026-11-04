@@ -21,13 +21,20 @@ import androidx.compose.ui.unit.dp
  * bodyLarge imbalance). The pair is one semantics group for TalkBack.
  */
 @Composable
-fun DadGiftFraming(monthly: String, daily: String, modifier: Modifier = Modifier) {
+fun DadGiftFraming(
+    monthly: String,
+    daily: String,
+    modifier: Modifier = Modifier,
+    monthlyModifier: Modifier = Modifier,
+    dailyModifier: Modifier = Modifier,
+    color: Color = DadTheme.color("ink"),
+) {
     Column(
         modifier = modifier.semantics { contentDescription = "$monthly, $daily" },
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Text(monthly, style = MaterialTheme.typography.headlineMedium, color = DadTheme.color("ink"))
-        Text(daily, style = MaterialTheme.typography.headlineMedium, color = DadTheme.color("ink"))
+        Text(monthly, modifier = monthlyModifier, style = MaterialTheme.typography.headlineMedium, color = color)
+        Text(daily, modifier = dailyModifier, style = MaterialTheme.typography.headlineMedium, color = color)
     }
 }
 
@@ -62,6 +69,18 @@ fun DadSymbol(name: String, contentDescription: String, modifier: Modifier = Mod
     val glyph = when (name) {
         "warning" -> "\u26A0" // ⚠
         "star" -> "\u2605" // ★
+        "check" -> "\u2713" // ✓
+        "lock" -> "\u2298" // ⊘ — a circled slash reads as "not yet", unlike an emoji padlock
+        "card" -> "\u25AD" // ▭
+        "history" -> "\u21BA" // ↺
+        "chevron" -> "\u203A" // ›
+        "person" -> "\u263A" // ☺
+        "bell" -> "\u266A" // ♪
+        "shield" -> "\u25C8" // ◈
+        "key" -> "\u2699" // ⚙
+        "calendar" -> "\u25A6" // ▦
+        "plus" -> "+"
+        "minus" -> "\u2212" // −
         else -> "\u2022" // • — an obvious, non-crashing fallback for an unknown name
     }
     Text(

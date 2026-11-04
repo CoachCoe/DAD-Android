@@ -2,19 +2,33 @@ package org.dad.foundation
 
 import android.content.ActivityNotFoundException
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedIconButton
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -23,10 +37,16 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -105,11 +125,11 @@ internal fun summaryLine(model: GivingModel): String {
 
 /**
  * Set / change your recurring gift (G-1/G-2/G-7), start one (D-5), update the card, or cancel (G-8/G-9).
- * Whole-dollar stepper $1…$30/day with the monthly ×30 echo and the streak bar; the cancel confirmation is
+ * Preset chips plus an "Other" stepper ($1…$30/day) with the monthly ×30 echo; the cancel confirmation is
  * rendered INLINE (never an OS dialog or bottom sheet).
  */
 @Composable
-fun GiftScreen(model: GivingModel, stubComplete: ((HostedHandoff.Purpose) -> Unit)? = null, onClose: (() -> Unit)? = null, onSignedOut: () -> Unit = {}) {
+fun GiftScreen(model: GivingModel, stubComplete: ((HostedHandoff.Purpose) -> Unit)? = null, onClose: (() -> Unit)? = null, onSignedOut: () -> Unit = {}, onOpenHistory: (() -> Unit)? = null) {
     LaunchedEffect(Unit) { model.load() }
     LaunchedEffect(model.signedOut) { if (model.signedOut) onSignedOut() }
     if (hostedPage(model, stubComplete)) return
@@ -122,7 +142,7 @@ fun GiftScreen(model: GivingModel, stubComplete: ((HostedHandoff.Purpose) -> Uni
             giftHeading(model.hasLoaded, model.recurring),
             style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading(),
         )
-        if (!model.hasLoaded) LoadingOrFailed(model) else Loaded(model, confirmingCancel) { confirmingCancel = it }
+        if (!model.hasLoaded) LoadingOrFailed(model) else Loaded(model, confirmingCancel, onOpenHistory) { confirmingCancel = it }
     }
 }
 
@@ -143,13 +163,16 @@ private fun LoadingOrFailed(model: GivingModel) {
 }
 
 @Composable
-private fun Loaded(model: GivingModel, confirmingCancel: Boolean, onConfirmingCancel: (Boolean) -> Unit) {
+private fun Loaded(model: GivingModel, confirmingCancel: Boolean, onOpenHistory: (() -> Unit)?, onConfirmingCancel: (Boolean) -> Unit) {
     Status(model)
     val state = model.recurring
-    if (state is RecurringState.Active || state == RecurringState.None) Stepper(model, startsGift = state == RecurringState.None)
+    if (state is RecurringState.Active || state == RecurringState.None) AmountSection(model, state, confirmingCancel)
     if (state.subscriptionIdOrNull != null) PaymentSection(model)
+    if (onOpenHistory != null) HistoryRow(onOpenHistory)
     Feedback(model)
     if (state is RecurringState.Active) CancelSection(model, state, confirmingCancel, onConfirmingCancel)
+    // The app has no other signal that payments are not live.
+    if (BuildConfig.DEBUG) Text("Preview build · test payments only", style = MaterialTheme.typography.bodySmall, color = DadTheme.color("muted"))
 }
 
 @Composable
@@ -182,69 +205,149 @@ private fun RenewalLines(model: GivingModel, state: RecurringState) {
             val next = model.offer?.nextAmountMinor
             if (pending != null) {
                 Text(
-                    "Changing to ${formatUsdMinor(pending.amountMinor)}/month from ${shortDate(pending.effectiveAt)}${if (pending.confirmed) "" else ", awaiting confirmation"}.",
+                    "Changing to ${formatUsdMinor(pending.amountMinor)}/month from ${longUsDate(pending.effectiveAt)}${if (pending.confirmed) "" else ", awaiting confirmation"}.",
                     style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("gift-pending-change"),
                 )
             } else if (next != null && next != state.amountMinor) {
                 Text(
-                    "Your next renewal will be ${formatUsdMinor(next)} on ${shortDate(model.offer?.effectiveAt ?: state.periodEnd)}.",
+                    "Your next renewal will be ${formatUsdMinor(next)} on ${longUsDate(model.offer?.effectiveAt ?: state.periodEnd)}.",
                     style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("gift-renewal"),
                 )
             } else {
-                Text("Renews ${shortDate(model.offer?.effectiveAt ?: state.periodEnd)}.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("gift-renewal"))
+                Text("Renews ${longUsDate(model.offer?.effectiveAt ?: state.periodEnd)}.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("gift-renewal"))
             }
             if (state.status.needsPaymentAttention) {
-                Text("⚠ Your last renewal didn’t go through. Update your payment method to keep your gift going.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("gift-payment-attention"))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+                    DadSymbol("warning", "Warning", tint = DadTheme.color("fail"))
+                    Text("Your last renewal didn’t go through. Update your payment method to keep your gift going.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("gift-payment-attention"))
+                }
             }
             if (state.status == SubscriptionStatus.INCOMPLETE) {
                 Text("We’re waiting for your first payment to go through.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("gift-incomplete"))
             }
         }
         is RecurringState.Ending ->
-            Text("Your gift won’t renew — it stays active until ${shortDate(state.stopsAt)}.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("gift-ending"))
+            Text("Your gift won’t renew — it stays active until ${longUsDate(state.stopsAt)}.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("gift-ending"))
         else -> Unit
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun Stepper(model: GivingModel, startsGift: Boolean) {
+private fun AmountSection(model: GivingModel, state: RecurringState, confirmingCancel: Boolean) {
+    val startsGift = state == RecurringState.None
     HomeCard("gift-stepper") {
-        Text(model.selection.dailyLabel, style = MaterialTheme.typography.displaySmall, modifier = Modifier.testTag("gift-daily"))
-        Text("${model.selection.monthlyLabel} · charged monthly", style = MaterialTheme.typography.bodyLarge)
-        // Wraps rather than squeezing a button to a sliver at large font scales.
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            // The stepper pair is a connected secondary control; the single filled primary below
-            // (start/save) is the screen's one high-emphasis action.
-            DadSecondaryButton(
-                "Decrease gift",
-                modifier = Modifier.testTag("gift-decrease"),
-                enabled = model.selection.dailyDollars > GiftAmount.MIN_DAILY_DOLLARS && !model.isBusy,
-            ) { model.decrement() }
-            DadSecondaryButton(
-                "Increase gift",
-                modifier = Modifier.testTag("gift-increase"),
-                enabled = model.selection.dailyDollars < GiftAmount.MAX_DAILY_DOLLARS && !model.isBusy,
-            ) { model.increment() }
+        GiftAmountChips(model.selection.dailyDollars, enabled = !model.isBusy, onSelect = { model.setDaily(it) })
+        Text("You’ll give", style = MaterialTheme.typography.labelLarge)
+        DadGiftFraming(
+            monthly = "${formatUsdMinor(model.selection.monthlyMinor)}/month",
+            daily = dailyPhrase(model.selection.dailyDollars),
+            monthlyModifier = Modifier.testTag("gift-selected-monthly"),
+            dailyModifier = Modifier.testTag("gift-daily"),
+        )
+        if (state is RecurringState.Active && model.selection.monthlyMinor != state.amountMinor) {
+            Text(
+                "A new amount starts with your next renewal on ${longUsDate(model.offer?.effectiveAt ?: state.periodEnd)}.",
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
-    DadStreakBar(filled = model.selection.dailyDollars.coerceAtMost(30))
-    if (startsGift) {
-        DadPrimaryButton("Start a monthly gift", Modifier.testTag("start-gift"), enabled = !model.isBusy) { model.startGift() }
-    } else {
-        DadPrimaryButton("Save gift", Modifier.testTag("save-gift"), enabled = !model.isBusy) { model.applySelection() }
+    // Hidden while the cancel confirmation is open so its "Keep giving" is the one filled primary.
+    if (!confirmingCancel) {
+        val monthly = formatUsdMinor(model.selection.monthlyMinor)
+        if (startsGift) {
+            DadPrimaryButton("Start · $monthly/month", Modifier.testTag("start-gift"), enabled = !model.isBusy) { model.startGift() }
+        } else {
+            DadPrimaryButton("Save · $monthly/month", Modifier.testTag("save-gift"), enabled = !model.isBusy) { model.applySelection() }
+        }
+    }
+}
+
+private fun dailyPhrase(dollars: Int) = "$$dollars a day"
+
+/** Preset chips (radio group) plus an "Other" chip that reveals a $1 stepper. Tapping Other changes no amount. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun GiftAmountChips(dailyDollars: Int, enabled: Boolean, onSelect: (Int) -> Unit) {
+    var otherPicked by rememberSaveable { mutableStateOf(false) }
+    val chip = GiftPresets.selectedChip(dailyDollars, otherPicked)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(Modifier.selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            GiftPresets.DAILY.forEach { dollars ->
+                AmountChip(dailyPhrase(dollars), chip == GiftPresets.Chip.entries[GiftPresets.DAILY.indexOf(dollars)], enabled, "gift-chip-$dollars") {
+                    otherPicked = false
+                    onSelect(dollars)
+                }
+            }
+            AmountChip("Other", chip == GiftPresets.Chip.OTHER, enabled, "gift-chip-other") { otherPicked = true }
+        }
+        if (chip == GiftPresets.Chip.OTHER) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                StepButton("minus", "Decrease by $1 a day", "gift-decrease", enabled && dailyDollars > GiftAmount.MIN_DAILY_DOLLARS) { onSelect(dailyDollars - 1) }
+                StepButton("plus", "Increase by $1 a day", "gift-increase", enabled && dailyDollars < GiftAmount.MAX_DAILY_DOLLARS) { onSelect(dailyDollars + 1) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AmountChip(label: String, selected: Boolean, enabled: Boolean, tag: String, onClick: () -> Unit) {
+    val dark = isSystemInDarkTheme()
+    val shape = RoundedCornerShape(DadTheme.radius("pill"))
+    val line = if (selected) "brand-ink" else if (dark) "ghost-line-dark" else "ghost-line"
+    Box(
+        Modifier
+            .testTag(tag)
+            .heightIn(min = 48.dp)
+            .clip(shape)
+            .background(if (selected) DadTheme.color("brand-wash") else Color.Transparent, shape)
+            .border(if (selected) 2.dp else 1.dp, DadTheme.color(line), shape)
+            .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick)
+            .padding(horizontal = 16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, style = MaterialTheme.typography.labelLarge, color = if (selected) DadTheme.color("ink") else Color.Unspecified)
+    }
+}
+
+@Composable
+private fun StepButton(symbol: String, description: String, tag: String, enabled: Boolean, onClick: () -> Unit) {
+    OutlinedIconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.size(48.dp).testTag(tag).semantics { contentDescription = description },
+    ) {
+        // The button carries the description; the glyph must not add a second label.
+        Box(Modifier.clearAndSetSemantics {}) { DadSymbol(symbol, description) }
     }
 }
 
 @Composable
 private fun PaymentSection(model: GivingModel) {
-    HomeCard("payment-card") {
-        Text("Payment method", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
-        Text(paymentLine(model.payment), style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("payment-status"))
-        if (model.recurring is RecurringState.Active) {
-            DadSecondaryButton("Update payment method", modifier = Modifier.testTag("update-payment"), enabled = !model.isBusy) { model.updatePayment() }
-        }
-    }
+    ListItem(
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        leadingContent = { Box(Modifier.clearAndSetSemantics {}) { DadSymbol("card", "Card") } },
+        headlineContent = { Text("Payment method", style = MaterialTheme.typography.titleMedium) },
+        supportingContent = { Text(paymentLine(model.payment), style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("payment-status")) },
+        // Not clickable as a whole: a clickable ListItem would merge payment-status away from tests.
+        trailingContent = if (model.recurring is RecurringState.Active) ({
+            IconButton(
+                onClick = { model.updatePayment() },
+                enabled = !model.isBusy,
+                modifier = Modifier.size(48.dp).testTag("update-payment").semantics { contentDescription = "Update payment method" },
+            ) { Box(Modifier.clearAndSetSemantics {}) { DadSymbol("chevron", "Update payment method") } }
+        }) else null,
+    )
+}
+
+@Composable
+private fun HistoryRow(onOpenHistory: () -> Unit) {
+    ListItem(
+        modifier = Modifier.clickable(role = Role.Button, onClick = onOpenHistory).testTag("gift-open-history"),
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        leadingContent = { Box(Modifier.clearAndSetSemantics {}) { DadSymbol("history", "History") } },
+        headlineContent = { Text("Gift history", style = MaterialTheme.typography.titleMedium) },
+        trailingContent = { Box(Modifier.clearAndSetSemantics {}) { DadSymbol("chevron", "Open") } },
+    )
 }
 
 private fun paymentLine(payment: PaymentMethodState?): String {
@@ -253,7 +356,7 @@ private fun paymentLine(payment: PaymentMethodState?): String {
     return when (state.kind) {
         PaymentMethodState.Kind.NONE -> idle
         PaymentMethodState.Kind.PENDING, PaymentMethodState.Kind.OPEN -> "A card update is in progress."
-        PaymentMethodState.Kind.APPLIED -> state.completedAt?.let { "Card updated ${shortDate(it)}." } ?: "Card updated."
+        PaymentMethodState.Kind.APPLIED -> state.completedAt?.let { "Card updated ${longUsDate(it)}." } ?: "Card updated."
         PaymentMethodState.Kind.EXPIRED -> "The last card update expired. You can start again."
         PaymentMethodState.Kind.CANCELLED -> "The last card update was cancelled. Your card is unchanged."
     }
@@ -281,9 +384,9 @@ private fun CancelSection(model: GivingModel, active: RecurringState.Active, con
             Text("Cancel your gift?", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
             Text(CancelCopy.confirmation(active.periodEnd))
             DadDestructiveTextButton("End my gift", modifier = Modifier.testTag("cancel-end"), enabled = !model.isBusy) { model.cancel(); onConfirming(false) }
-            DadSecondaryButton("Keep giving", modifier = Modifier.testTag("cancel-keep")) { onConfirming(false) }
+            DadPrimaryButton("Keep giving", Modifier.testTag("cancel-keep")) { onConfirming(false) }
         }
     } else {
-        DadSecondaryButton("Cancel gift", modifier = Modifier.testTag("gift-cancel"), enabled = !model.isBusy) { onConfirming(true) }
+        DadDestructiveTextButton("Cancel gift", modifier = Modifier.testTag("gift-cancel"), enabled = !model.isBusy) { onConfirming(true) }
     }
 }
