@@ -21,12 +21,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.material3.Button
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Switch
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -521,10 +520,19 @@ class MainActivity : ComponentActivity() {
                 incomingTap = null
             }
             val dark = isSystemInDarkTheme()
-            val primary = DadTheme.brandAccent(dark)
-            val colors = if (dark) darkColorScheme(primary = primary, onPrimary = tokenColor("ink-deep"), background = tokenColor("ink-deep"))
-                else lightColorScheme(primary = primary, onPrimary = tokenColor("paper"), background = tokenColor("paper"))
-            MaterialTheme(colorScheme = colors) {
+            // Material primary mirrors the web/DAD primary button: brand fill with an ink label
+            // (ink-on-brand = 5.11:1, WCAG AA) in both themes. Text links/icons on the page keep
+            // using brand-ink via DadTheme.brandAccent() — a separate role from the button fill.
+            val colors = if (dark) darkColorScheme(primary = tokenColor("brand"), onPrimary = tokenColor("ink"), background = tokenColor("ink-deep"))
+                else lightColorScheme(primary = tokenColor("brand"), onPrimary = tokenColor("ink"), background = tokenColor("paper"))
+            MaterialTheme(
+                colorScheme = colors,
+                typography = dadTypography(),
+                shapes = Shapes(
+                    small = RoundedCornerShape(DadTheme.radius("field")),
+                    medium = RoundedCornerShape(DadTheme.radius("card")),
+                ),
+            ) {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     val router = remember { RoleRouter() }
                     var root by remember { mutableStateOf<RoleRouter.Root>(router.root) }
@@ -735,7 +743,7 @@ private fun DonorLanding(model: AccountModel, onSettings: (() -> Unit)? = null, 
                 AccountState.Unavailable -> {
                     Text("Your account is unavailable right now.", style = MaterialTheme.typography.titleLarge)
                     Text("Please try again in a moment.")
-                    Button(onClick = { model.load() }) { Text("Try again") }
+                    DadPrimaryButton("Try again") { model.load() }
                 }
                 AccountState.SignedOut -> Text("You’re signed out.")
             }
@@ -744,7 +752,7 @@ private fun DonorLanding(model: AccountModel, onSettings: (() -> Unit)? = null, 
         // whenever the donor is signed in, including while the profile read is retrying.
         if (onSettings != null) {
             Spacer(Modifier.height(20.dp))
-            Button(onClick = onSettings, modifier = Modifier.testTag("open-settings")) { Text("Settings") }
+            DadSecondaryButton("Settings", modifier = Modifier.testTag("open-settings")) { onSettings() }
         }
         Spacer(Modifier.height(20.dp))
         home()
@@ -777,7 +785,7 @@ private fun SettingsHome(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("Settings", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
-        if (onBack != null && !model.signedOut) Button(onClick = onBack, modifier = Modifier.testTag("settings-back")) { Text("Back") }
+        if (onBack != null && !model.signedOut) DadSecondaryButton("Back", modifier = Modifier.testTag("settings-back")) { onBack() }
         if (model.signedOut) {
             Text("You're signed out.", modifier = Modifier.testTag("settings-signed-out"))
             return@Column
@@ -850,30 +858,31 @@ private fun SettingsContent(
     }
 
     // Sign out.
-    Button(onClick = { model.signOut() }, modifier = Modifier.testTag("settings-signout")) { Text("Sign out") }
+    DadSecondaryButton("Sign out", modifier = Modifier.testTag("settings-signout")) { model.signOut() }
 
     // Delete account (store-mandated, §6.12): a typed-word confirm gate, inline.
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("Delete account", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
         if (!confirmingDelete) {
-            Button(onClick = { onConfirmingChange(true) }, modifier = Modifier.testTag("delete-start")) { Text("Delete my account") }
+            DadDestructiveTextButton("Delete my account", modifier = Modifier.testTag("delete-start")) { onConfirmingChange(true) }
         } else {
             Text(DeleteAccountGate(deleteTyped).helpText, style = MaterialTheme.typography.bodySmall)
             OutlinedTextField(
                 value = deleteTyped, onValueChange = onTypedChange,
                 singleLine = true, modifier = Modifier.fillMaxWidth().testTag("delete-input"),
             )
-            Button(
-                onClick = { model.deleteAccount(DeleteAccountGate(deleteTyped)) },
-                enabled = DeleteAccountGate(deleteTyped).isConfirmed,
+            DadDestructiveTextButton(
+                "Permanently delete",
                 modifier = Modifier.testTag("delete-confirm"),
-            ) { Text("Permanently delete") }
+                enabled = DeleteAccountGate(deleteTyped).isConfirmed,
+            ) { model.deleteAccount(DeleteAccountGate(deleteTyped)) }
             // The server refuses deletion while a monthly gift is set to renew (or a checkout is open): rather than
             // a dead end, offer the real cancel-gift flow, then the donor comes back here and deletes.
             if (model.deletionBlocked && onCancelGift != null) {
-                OutlinedButton(onClick = onCancelGift, modifier = Modifier.heightIn(min = 48.dp).testTag("delete-cancel-gift")) { Text("Cancel my monthly gift") }
+                DadSecondaryButton("Cancel my monthly gift", modifier = Modifier.testTag("delete-cancel-gift")) { onCancelGift() }
             }
-            Button(onClick = { onConfirmingChange(false); onTypedChange("") }) { Text("Keep my account") }
+            // The safe default is the one filled primary on this screen.
+            DadPrimaryButton("Keep my account") { onConfirmingChange(false); onTypedChange("") }
         }
     }
 }
