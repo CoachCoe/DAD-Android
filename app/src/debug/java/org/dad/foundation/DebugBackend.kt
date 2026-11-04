@@ -28,7 +28,9 @@ import okio.Buffer
  * Contact details, email change, sessions, the employer link and the Wallet pass are scripted by [StubAccount].
  * The partner sign-in link and portal are scripted by [StubPartner]; `stub_partner_signed_in` starts with a stored
  * partner session; `stub_partner_viewer` makes the partner a read-only viewer, and `stub_application_pending` / `_approved` /
- * `_rejected` / `_unknown` seed a stored application receipt the stub answers with that status.
+ * `_rejected` / `_unknown` seed a stored application receipt the stub answers with that status. A native application
+ * submission (`applyWithReceipt`) is accepted (200, and the receipt then reads PENDING) unless `stub_application_submit_invalid`
+ * (422), `stub_application_submit_throttled` (429 + Retry-After, no body) or `stub_application_submit_fails_first` (503 then 200).
  * `/analytics/events` accepts every batch; the analytics question starts answered "no" unless `stub_analytics_unset`.
  * `stub_push` links a push provider with a fixed token, which `/donor/me/push-device` accepts.
  * Events (`/donor/me/events`) are scripted by [StubEvents] (`stub_events_invited`, `stub_events_fail_first`, `stub_events_not_eligible`).
@@ -54,7 +56,7 @@ object DebugBackend {
 
     fun stub(context: Context, scope: CoroutineScope, options: LaunchOptions): AppServices? {
         if (!options.stubBackend) return null
-        val interceptor = StubInterceptor(options.stubDeleteBlocked, options.stubDashboard, options.stubGift, options.stubEvents, options.stubEngagement, options.stubPartnerViewer, options.stubApplication)
+        val interceptor = StubInterceptor(options.stubDeleteBlocked, options.stubDashboard, options.stubGift, options.stubEvents, options.stubEngagement, options.stubPartnerViewer, options.stubApplication, options.stubApplicationSubmit)
         val analytics = AnalyticsUploader(
             MemoryAnalyticsConsent(choice = if (options.stubAnalyticsUnset) null else false),
             WireAnalytics(ORIGIN, access = { null }, OkHttpClient.Builder().addInterceptor(interceptor).build()), scope,
@@ -86,9 +88,14 @@ object DebugBackend {
             partner = PartnerSession(InMemoryCredentialStore(
                 if (options.stubPartnerSignedIn) Credentials("stub-partner-0", "", Long.MAX_VALUE) else null,
             )).let {
-                PartnerKit(it, WirePartnerAuth(ORIGIN, it, http), WirePartner(ORIGIN, it, http), WireApplicationStatus(ORIGIN, InMemoryCredentialStore(
+                // The submit and the status read share one receipt store, as the app's Keystore item is shared: a
+                // launch that seeded an application status starts with the stub receipt; otherwise a native submit
+                // writes it and the status read then recognizes it.
+                val receipt = InMemoryCredentialStore(
                     options.stubApplication?.let { Credentials("stub-receipt-" + "r".repeat(31), "", Long.MAX_VALUE) },
-                ), http))
+                )
+                PartnerKit(it, WirePartnerAuth(ORIGIN, it, http), WirePartner(ORIGIN, it, http),
+                    WireApplicationStatus(ORIGIN, receipt, http), WirePartnerApplication(ORIGIN, receipt, http))
             },
             analytics = analytics,
             push = WireDonorPush(ProductClient(ORIGIN, session, http)),
@@ -104,13 +111,13 @@ class InMemoryCredentialStore(private var value: Credentials? = null) : Credenti
     @Synchronized override fun clear() { value = null }
 }
 
-private class StubInterceptor(private val deletionBlocked: Boolean, scenario: StubDashboard, gift: StubGift, eventsScenario: StubEventsScenario, engagementScenario: StubEngagementScenario, partnerViewer: Boolean, application: String?) : Interceptor {
+private class StubInterceptor(private val deletionBlocked: Boolean, scenario: StubDashboard, gift: StubGift, eventsScenario: StubEventsScenario, engagementScenario: StubEngagementScenario, partnerViewer: Boolean, application: String?, applicationSubmit: StubApplicationSubmit) : Interceptor {
     private val home = StubDonorHome(scenario)
     private val giving = StubGiving(gift)
     private val events = StubEvents(eventsScenario)
     private val engagement = StubEngagement(engagementScenario)
     private val account = StubAccount()
-    private val partner = StubPartner(partnerViewer, application)
+    private val partner = StubPartner(partnerViewer, application, applicationSubmit)
     private var generation = 0
     private var deleted = false
     private var version = 3
@@ -159,9 +166,11 @@ private class StubInterceptor(private val deletionBlocked: Boolean, scenario: St
             return reply(200, """{"bound":${payload.contains(DebugBackend.COMPANY_TOKEN)}}""")
         }
         if (partner.handles(request.url.encodedPath)) {
-            val answer = partner.answer(request.method, request.url.encodedPath, payload, request.header("Authorization"))
-            return Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(answer.code).message("stub")
-                .body(answer.body.toResponseBody(answer.type.toMediaType())).build()
+            val answer = partner.answer(request.method, request.url.encodedPath, payload, request.header("Authorization"), request.header("Idempotency-Key"))
+            val builder = Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(answer.code).message("stub")
+                .body(answer.body.toResponseBody(answer.type.toMediaType()))
+            answer.headers.forEach { (name, value) -> builder.header(name, value) }
+            return builder.build()
         }
         return when (request.method to request.url.encodedPath) {
             "POST" to "/donor/me/push-device" -> if (authorized) reply(200, """{"registered":true,"platform":"ANDROID","environment":null}""") else reply(401)

@@ -20,9 +20,9 @@ import retrofit2.http.GET
 // it has a portal. The server identifies the application by a private receipt the applicant generated when applying;
 // a native request presents that receipt as its bearer (`applicationStatus`).
 //
-// The receipt can only be created by `applyWithReceipt`, which the contract tags browser-only, so an app install has
-// no receipt of its own today and this card stays hidden until DAD-Main admits that operation to the mobile contract.
-// The seam, the model and the card are complete and tested against the contract.
+// The receipt is created by `applyWithReceipt` (contract 2.11) when the applicant submits the form natively
+// (`WirePartnerApplication` in ApplicationSubmit.kt); this card then reads the status back from the stored receipt,
+// and forgets it once the server no longer recognizes it.
 
 /** Where an application stands. A status this build does not know is kept verbatim, never guessed. */
 sealed interface ApplicationState {

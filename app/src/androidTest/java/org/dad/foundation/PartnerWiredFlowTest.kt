@@ -132,6 +132,60 @@ class PartnerWiredFlowTest {
         }
     }
 
+    private fun fillApplication() {
+        compose.enterText("partner-app-organization", "Rivertown Mills")
+        compose.enterText("partner-app-website", "rivertown.example")
+        compose.enterText("partner-app-workforce", "120")
+        compose.enterText("partner-app-contact", "Ada Admin")
+        compose.enterText("partner-app-title", "COO")
+        compose.enterText("partner-app-email", "ada@rivertown.example")
+        compose.enterText("partner-app-phone", "+1 555 0100")
+    }
+
+    @Test fun submittingAnApplicationStoresTheReceiptAndTheStatusCardThenShowsPending() {
+        launch().use {
+            openApplicantSignIn()
+            // No receipt yet: the status card is absent and the apply button is offered.
+            assertTrue(absent("partner-application-status"))
+            compose.tapSafely("partner-apply-in-app")
+            waitFor("partner-app-submit")
+            fillApplication()
+            compose.tapSafely("partner-app-submit")
+            // Back on sign-in, the just-stored receipt reads as PENDING and the apply button is gone.
+            waitFor("partner-application-status")
+            compose.onNodeWithTag("partner-application-message").assertTextContains("being reviewed", substring = true)
+            assertTrue(absent("partner-apply-in-app"))
+        }
+    }
+
+    @Test fun anInvalidApplicationShowsAnErrorAndKeepsTheFormForCorrection() {
+        launch("stub_application_submit_invalid").use {
+            openApplicantSignIn()
+            compose.tapSafely("partner-apply-in-app")
+            waitFor("partner-app-submit")
+            fillApplication()
+            compose.tapSafely("partner-app-submit")
+            waitFor("partner-app-error")
+            // A 422 unlocks the form: the organization field is still there to correct.
+            assertTrue(!absent("partner-app-organization"))
+        }
+    }
+
+    @Test fun anUnconfirmedSendLocksTheFormAndRetrySucceeds() {
+        launch("stub_application_submit_fails_first").use {
+            openApplicantSignIn()
+            compose.tapSafely("partner-apply-in-app")
+            waitFor("partner-app-submit")
+            fillApplication()
+            compose.tapSafely("partner-app-submit")
+            waitFor("partner-app-error")
+            // The first attempt was a 503: the button is now "Retry" and resends the same attempt, which succeeds.
+            compose.tapSafely("partner-app-submit")
+            waitFor("partner-application-status")
+            compose.onNodeWithTag("partner-application-message").assertTextContains("being reviewed", substring = true)
+        }
+    }
+
     @Test fun signingOutReturnsToRoleSelectAndThePortalIsGone() {
         launch("stub_partner_signed_in").use {
             openOrganization()

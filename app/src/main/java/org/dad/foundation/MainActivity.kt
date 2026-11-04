@@ -457,6 +457,13 @@ class MainActivity : ComponentActivity() {
                 "stub_application_pending" to "PENDING", "stub_application_approved" to "APPROVED",
                 "stub_application_rejected" to "REJECTED", "stub_application_unknown" to "UNDER_REVIEW",
             ).entries.firstOrNull { intent.getBooleanExtra(it.key, false) }?.value,
+            stubApplicationSubmit = when {
+                !BuildConfig.DEBUG -> StubApplicationSubmit.ACCEPTS
+                intent.getBooleanExtra("stub_application_submit_invalid", false) -> StubApplicationSubmit.INVALID
+                intent.getBooleanExtra("stub_application_submit_throttled", false) -> StubApplicationSubmit.THROTTLED
+                intent.getBooleanExtra("stub_application_submit_fails_first", false) -> StubApplicationSubmit.FAILS_FIRST
+                else -> StubApplicationSubmit.ACCEPTS
+            },
             stubAnalyticsUnset = BuildConfig.DEBUG && intent.getBooleanExtra("stub_analytics_unset", false),
             stubPush = BuildConfig.DEBUG && intent.getBooleanExtra("stub_push", false),
         )
@@ -509,10 +516,11 @@ class MainActivity : ComponentActivity() {
                             management = WireAccountManagement(ProductClient(origin, session, http)),
                             wallet = WireWalletPass(ProductClient(origin, session, http)),
                             partner = PartnerSession(KeystoreCredentialStore(appContext, "partner-session", refreshable = false)).let {
-                                // Nothing in the app creates a receipt yet (`applyWithReceipt` is browser-only in the contract), so this
-                                // reads nothing until DAD-Main admits it to the mobile contract.
+                                // The application receipt (`applyWithReceipt`, contract 2.11) is kept in its own Keystore item, apart
+                                // from the donor and partner sessions. The submit writes it and the status read reads it back.
+                                val receipt = KeystoreCredentialStore(appContext, "partner-application-receipt", refreshable = false)
                                 PartnerKit(it, WirePartnerAuth(origin, it, http), WirePartner(origin, it, http),
-                                    WireApplicationStatus(origin, KeystoreCredentialStore(appContext, "partner-application-receipt", refreshable = false), http))
+                                    WireApplicationStatus(origin, receipt, http), WirePartnerApplication(origin, receipt, http))
                             },
                             analytics = analytics,
                             push = WireDonorPush(ProductClient(origin, session, http)),
@@ -618,6 +626,7 @@ class MainActivity : ComponentActivity() {
                             onSignedIn = { model.onSignedIn() },
                             partnerSignIn = model.partner?.signIn,
                             applicationStatus = model.partner?.applicationStatus,
+                            applicationSubmit = model.partner?.applicationSubmit,
                             partnerToken = model.pendingPartnerToken,
                             onPartnerTokenConsumed = { model.partnerTokenConsumed() },
                             onPartnerSignedIn = { model.onPartnerSignedIn() },
