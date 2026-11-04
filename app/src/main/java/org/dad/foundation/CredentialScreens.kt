@@ -24,6 +24,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentType
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -55,12 +56,12 @@ internal fun PasswordField(value: String, onChange: (String) -> Unit, label: Str
 internal fun SignupFlow(model: SignupModel, onPastedLink: (String) -> Boolean, notice: String?, onBack: () -> Unit) {
     val sent = model.phase as? SignupPhase.Sent
     if (sent != null) {
-        CheckEmail("We sent a sign-in link to ${sent.email}. Open it on this phone to continue.", notice, onPastedLink, onChangeEmail = model::edit)
+        CheckEmail(sent.email, notice, onPastedLink, onChangeEmail = model::edit, onResend = { model.edit(); model.submit() })
         return
     }
     val busy = model.phase is SignupPhase.Submitting
     AuthColumn("signup") {
-        Text("Create your account", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
+        Text("Step 1 of 2 · About you", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
         Spacer(Modifier.height(8.dp))
         Text("We’ll email you a single-use link to finish signing in.")
         Spacer(Modifier.height(16.dp))
@@ -101,8 +102,7 @@ internal fun EmailLinkFlow(model: SignInLinkModel, onPastedLink: (String) -> Boo
     val sent = model.phase as? SignInLinkPhase.Sent
     if (sent != null) {
         // The server never says whether the address has an account, so neither does the app.
-        CheckEmail("If ${sent.email} belongs to a DAD account, we sent it a sign-in link. Open it on this phone to continue.",
-            notice, onPastedLink, onChangeEmail = model::edit)
+        CheckEmail(sent.email, notice, onPastedLink, onChangeEmail = model::edit, onResend = { model.edit(); model.submit() })
         return
     }
     val busy = model.phase is SignInLinkPhase.Submitting
@@ -123,15 +123,27 @@ internal fun EmailLinkFlow(model: SignInLinkModel, onPastedLink: (String) -> Boo
     }
 }
 
-/** "Check your email": the link normally opens the app by itself; a pasted link is the fallback. */
+/** "Check your inbox": the link normally opens the app by itself; a pasted link is the fallback.
+ *  Resend is disabled for [RESEND_COOLDOWN_SECONDS] with a static (non-animated) countdown, then enables. */
 @Composable
-private fun CheckEmail(message: String, notice: String?, onPastedLink: (String) -> Boolean, onChangeEmail: () -> Unit) {
+private fun CheckEmail(email: String, notice: String?, onPastedLink: (String) -> Boolean, onChangeEmail: () -> Unit, onResend: () -> Unit) {
     var pasted by rememberSaveable { mutableStateOf("") }
     var unrecognised by rememberSaveable { mutableStateOf(false) }
+    // Static countdown: a saveable deadline (survives rotation) and a 1s tick that recomputes the
+    // remaining whole seconds as plain text. Numbers are never animated.
+    val deadline = rememberSaveable { System.currentTimeMillis() + RESEND_COOLDOWN_SECONDS * 1000L }
+    var remaining by rememberSaveable { mutableStateOf(RESEND_COOLDOWN_SECONDS) }
+    LaunchedEffect(deadline) {
+        while (remaining > 0) {
+            remaining = (((deadline - System.currentTimeMillis()) + 999) / 1000).toInt().coerceAtLeast(0)
+            if (remaining > 0) kotlinx.coroutines.delay(1000)
+        }
+    }
     AuthColumn("check-email") {
-        Text("Check your email", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
+        Text("Check your inbox", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
         Spacer(Modifier.height(12.dp))
-        Text(message, modifier = Modifier.testTag("check-email-address"))
+        // The address, in bold, so the donor can confirm where the link went.
+        Text(email, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold), modifier = Modifier.testTag("check-email-address"))
         Spacer(Modifier.height(12.dp))
         Text("The link works once and expires soon. If it doesn’t open the app, paste it here.")
         Spacer(Modifier.height(12.dp))
@@ -147,9 +159,18 @@ private fun CheckEmail(message: String, notice: String?, onPastedLink: (String) 
         if (unrecognised) FieldError("That doesn’t look like a DAD sign-in link. Copy the whole link from the email.", "paste-error")
         else if (notice != null) FieldError(notice, "check-email-notice")
         Spacer(Modifier.height(12.dp))
+        DadSecondaryButton(
+            text = if (remaining > 0) "Resend in ${remaining}s" else "Resend the link",
+            modifier = Modifier.fillMaxWidth().testTag("check-email-resend"),
+            enabled = remaining == 0,
+        ) { onResend() }
+        Spacer(Modifier.height(12.dp))
         Button(onClick = onChangeEmail, modifier = Modifier.testTag("check-email-change")) { Text("Use a different email") }
     }
 }
+
+/** Resend is held for half a minute so a slow email delivery is not re-triggered on top of itself. */
+private const val RESEND_COOLDOWN_SECONDS = 30
 
 @Composable
 internal fun PasswordSignInFlow(model: PasswordSignInModel, onSignedIn: () -> Unit, onBack: () -> Unit) {

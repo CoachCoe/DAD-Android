@@ -53,7 +53,9 @@ sealed interface PhoneSignInPhase {
 class PhoneSignInModel(private val service: SignInService, private val establish: Establish) : ViewModel() {
     var phase: PhoneSignInPhase by mutableStateOf(PhoneSignInPhase.EnterPhone)
         private set
-    var phone: String by mutableStateOf("")
+    // Prefilled with the US country code; the donor types the rest. Whitespace is trimmed before the
+    // E.164 check and before the number goes on the wire, so "+1 415…" validates and sends as "+1415…".
+    var phone: String by mutableStateOf("+1 ")
     var code: String by mutableStateOf("")
     private var activeHandle: String? = null
     private var work: Job? = null
@@ -66,15 +68,18 @@ class PhoneSignInModel(private val service: SignInService, private val establish
             else -> false
         }
 
+    /** The number with all whitespace removed, e.g. "+1 415 555 1234" -> "+14155551234". */
+    private val normalizedPhone: String get() = phone.filterNot { it.isWhitespace() }
+
     /** E.164-ish: a leading + and 8–15 digits. Keeps obviously-bad input off the wire. */
-    val canRequestCode: Boolean get() = PHONE.matches(phone)
+    val canRequestCode: Boolean get() = PHONE.matches(normalizedPhone)
     /** The server issues 6-digit codes; enable verify only when the field is complete. */
     val canVerify: Boolean get() = CODE.matches(code)
 
     fun requestCode() {
         if (!canRequestCode || phase is PhoneSignInPhase.RequestingCode || phase is PhoneSignInPhase.Verifying) return
         phase = PhoneSignInPhase.RequestingCode
-        val number = phone
+        val number = normalizedPhone
         work = viewModelScope.launch {
             try {
                 val handle = service.requestPhoneCode(number)

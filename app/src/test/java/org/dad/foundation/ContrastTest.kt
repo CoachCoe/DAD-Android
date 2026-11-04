@@ -50,4 +50,13 @@ class ContrastTest {
         assertTrue(DadTheme.contrast("dkmut", "ink") >= 4.5)
         assertTrue(DadTheme.contrast("brand", "ink") >= 4.5)
     }
+
+    @Test fun welcomeTextOnInkMeetsAA() {
+        // Welcome (RoleSelect) is on the `ink` background. Title in `paper` (16.29:1); eyebrow, sub and the
+        // Founding-Donor line in `dkmut` (9.77:1); the "Give $1 a day" primary is a `brand` fill with an
+        // `ink` label (5.11:1). Each foreground clears WCAG AA on its background.
+        assertTrue(DadTheme.contrast("paper", "ink") >= 4.5)
+        assertTrue(DadTheme.contrast("dkmut", "ink") >= 4.5)
+        assertTrue(DadTheme.contrast("ink", "brand") >= 4.5)
+    }
 }

@@ -839,6 +839,18 @@ private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaun
             }
         }
     }
+
+    // The analytics question is asked ONCE, after the first sign-in (moved off the Welcome screen) — the
+    // same copy, options and tags, now in a ModalBottomSheet. Shown while the donor has not yet chosen.
+    val analytics = model.analytics
+    if (ready && analytics != null && analytics.choice == null) {
+        val sheetState = rememberModalBottomSheetState()
+        ModalBottomSheet(onDismissRequest = { /* a choice is required; dismissing re-shows next event */ }, sheetState = sheetState) {
+            Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 24.dp)) {
+                AnalyticsChoiceBody(analytics)
+            }
+        }
+    }
 }
 
 /** The bare tab body (no pushed screen). Split out to keep [DonorShell] readable. */
