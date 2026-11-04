@@ -35,4 +35,28 @@ class ContrastTest {
         assertTrue(DadTheme.contrast("muted", "paper") >= 4.5)
         assertTrue(DadTheme.contrast("dkmut", "ink-deep") >= 4.5)
     }
+
+    @Test fun atRiskBannerTextMeetsAA() {
+        // Home's at-risk banner: `warn` text + warning glyph on a `warn-wash` block. warn-on-warn-wash =
+        // 4.91:1 (AA). Colour is not the only signal (glyph + text), but the text itself must still read.
+        assertTrue(DadTheme.contrast("warn", "warn-wash") >= 4.5)
+    }
+
+    @Test fun streakHeroTextOnInkMeetsAA() {
+        // The streak hero card sits on the `ink` surface. Every foreground it uses clears AA on ink:
+        // the day count / rank lines in `paper` (16.29:1), the low-emphasis labels in `dkmut` (9.77:1),
+        // and the Founding-Donor chip in `brand` (5.11:1).
+        assertTrue(DadTheme.contrast("paper", "ink") >= 4.5)
+        assertTrue(DadTheme.contrast("dkmut", "ink") >= 4.5)
+        assertTrue(DadTheme.contrast("brand", "ink") >= 4.5)
+    }
+
+    @Test fun welcomeTextOnInkMeetsAA() {
+        // Welcome (RoleSelect) is on the `ink` background. Title in `paper` (16.29:1); eyebrow, sub and the
+        // Founding-Donor line in `dkmut` (9.77:1); the "Give $1 a day" primary is a `brand` fill with an
+        // `ink` label (5.11:1). Each foreground clears WCAG AA on its background.
+        assertTrue(DadTheme.contrast("paper", "ink") >= 4.5)
+        assertTrue(DadTheme.contrast("dkmut", "ink") >= 4.5)
+        assertTrue(DadTheme.contrast("ink", "brand") >= 4.5)
+    }
 }

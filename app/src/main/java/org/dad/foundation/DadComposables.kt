@@ -6,6 +6,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -46,6 +47,29 @@ fun DadStatTile(title: String, value: String?, caption: String, modifier: Modifi
         }
         Text(caption, style = MaterialTheme.typography.bodySmall, color = DadTheme.color("muted"))
     }
+}
+
+/**
+ * A named icon-glyph carrying a real [contentDescription], so a "star"/"warning" cue is never colour
+ * alone — the glyph is a shape and TalkBack reads the description. No `material-icons` Gradle artifact
+ * and no Material Symbols font are on the classpath (adding either breaks the NO-new-dependency
+ * constraint), so — matching the shell's established glyph-as-icon precedent (the back arrow \u2190 in
+ * DadBackBar) — each named symbol maps to a stable Unicode glyph. The token [tint] keeps it in the
+ * design palette; callers place it inline with the text it annotates.
+ */
+@Composable
+fun DadSymbol(name: String, contentDescription: String, modifier: Modifier = Modifier, tint: Color = Color.Unspecified) {
+    val glyph = when (name) {
+        "warning" -> "\u26A0" // ⚠
+        "star" -> "\u2605" // ★
+        else -> "\u2022" // • — an obvious, non-crashing fallback for an unknown name
+    }
+    Text(
+        glyph,
+        modifier = modifier.semantics { this.contentDescription = contentDescription },
+        color = tint,
+        style = MaterialTheme.typography.titleMedium,
+    )
 }
 
 /**

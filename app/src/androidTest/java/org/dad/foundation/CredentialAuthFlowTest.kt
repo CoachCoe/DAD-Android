@@ -58,6 +58,8 @@ class CredentialAuthFlowTest {
 
     private fun passwordSignIn(email: String, password: String) {
         openMethods()
+        // Password sign-in lives under "More options" in the redesigned methods screen.
+        compose.tapSafely("more-options")
         compose.tapSafely("method-password")
         waitFor("password-sign-in")
         type("password-email", email)
@@ -179,6 +181,8 @@ class CredentialAuthFlowTest {
     @Test fun googleAndPasskeyShowTheNotAvailableHint() {
         launch().use {
             openMethods()
+            // The lower-emphasis methods and their "not available yet" hint now live under "More options".
+            compose.tapSafely("more-options")
             compose.onNodeWithTag("external-unavailable").performScrollTo().assertIsDisplayed()
             assertTrue(absent("method-google"))
             assertTrue(absent("method-passkey"))

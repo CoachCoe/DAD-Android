@@ -89,17 +89,9 @@ private fun StubHostedPage(purpose: HostedHandoff.Purpose, onComplete: () -> Uni
     }
 }
 
-/** The donor's monthly gift at a glance (G-7..G-9); "Manage gift" opens the full gift screen. */
-@Composable
-fun GiftSummaryCard(model: GivingModel, onManage: () -> Unit) {
-    HomeCard("gift-summary-card") {
-        Text("Your monthly gift", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
-        Text(summaryLine(model), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("gift-summary"))
-        DadSecondaryButton("Manage gift", modifier = Modifier.testTag("open-gift")) { onManage() }
-    }
-}
-
-private fun summaryLine(model: GivingModel): String {
+/** The one-line gift state ("No monthly gift yet.", "$150/month · renews …", "…no further renewals",
+ *  "Your gift isn’t available right now."). Shared with Home's monthly-gift row so both read identically. */
+internal fun summaryLine(model: GivingModel): String {
     if (!model.hasLoaded) return if (model.phase is GivingPhase.Failed) "Your gift isn’t available right now." else "Loading your gift…"
     return when (val state = model.recurring) {
         RecurringState.None -> "No monthly gift yet."

@@ -107,7 +107,9 @@ fun ComposeTestRule.tapNode(node: SemanticsNodeInteraction, description: String)
 }
 
 /** Types into [tag] (scrolled into view first), then waits for the keyboard to settle so the next tap is safe. */
-fun ComposeTestRule.enterText(tag: String, text: String, replace: Boolean = false, timeoutMs: Long = 15_000) {
+fun ComposeTestRule.enterText(
+    tag: String, text: String, replace: Boolean = false, timeoutMs: Long = 15_000, settleAfter: Boolean = true,
+) {
     waitUntil(timeoutMs) { exists(tag) }
     val field = onNodeWithTag(tag).performScrollTo()
     // A semantics-only insertion can request the IME before Android has served the editor.
@@ -115,5 +117,7 @@ fun ComposeTestRule.enterText(tag: String, text: String, replace: Boolean = fals
     tapNode(field, tag)
     awaitKeyboardSettled()
     if (replace) field.performTextReplacement(text) else field.performTextInput(text)
-    awaitKeyboardSettled()
+    // A field whose last character submits (the 6-digit sign-in code) dismisses the keyboard itself,
+    // so there is no settled keyboard to wait for afterwards.
+    if (settleAfter) awaitKeyboardSettled()
 }
