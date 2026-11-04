@@ -8,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -27,12 +28,15 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Switch
 import androidx.compose.material3.TopAppBar
@@ -721,6 +725,20 @@ private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaun
                 }
             }
         },
+        floatingActionButton = {
+            // Invite is Home's single filled primary: brand fill, ink content. Shown only on the bare
+            // Home tab (no pushed screen), it opens the existing share flow — which lives on the Circle
+            // tab (EngagementHome hosts the share sheet, QR, and the public-name step when no name is
+            // set yet) — so there is no second share implementation and no new analytics event.
+            if (onShell && tab == DonorTab.HOME && ready && engagementService != null) {
+                ExtendedFloatingActionButton(
+                    onClick = { tab = DonorTab.CIRCLE },
+                    containerColor = DadTheme.color("brand"),
+                    contentColor = DadTheme.color("ink"),
+                    modifier = Modifier.testTag("invite-fab"),
+                ) { Text("Invite", style = MaterialTheme.typography.labelLarge) }
+            }
+        },
         bottomBar = {
             if (onShell) {
                 NavigationBar {
@@ -879,12 +897,30 @@ private fun DonorShellTab(
     }
 }
 
+/** The DAD brand mark as a small rounded tile (brand fill, ink "D"). A shape + letter, not colour alone;
+ *  carries a description so TalkBack names the mark. No icon dependency is added. */
+@Composable
+private fun DadBrandTile(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .heightIn(min = 32.dp)
+            .background(DadTheme.color("brand"), RoundedCornerShape(DadTheme.radius("field")))
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .semantics { contentDescription = "DAD" },
+        contentAlignment = Alignment.Center,
+    ) { Text("D", style = MaterialTheme.typography.titleMedium, color = DadTheme.color("ink")) }
+}
+
 /** The Home top app bar: the title and the account avatar (opens Settings) in the actions slot. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HomeTopBar(model: AccountModel, onSettings: (() -> Unit)?) {
+    val publicName = (model.state as? AccountState.Ready)?.profile?.publicName?.trim()?.takeIf { it.isNotEmpty() }
     TopAppBar(
-        title = { Text("DAD", modifier = Modifier.dadHeading()) },
+        // The brand tile is the leading element (the old "DAD" wordmark lived in the body header,
+        // removed in this phase); it carries a description so the mark is not colour alone.
+        navigationIcon = { DadBrandTile(Modifier.padding(start = 16.dp)) },
+        title = { Text(if (publicName != null) "Hi, $publicName" else "Welcome back", modifier = Modifier.dadHeading()) },
         actions = {
             if (onSettings != null) {
                 val initial = ((model.state as? AccountState.Ready)?.profile?.publicName?.trim()?.firstOrNull()
@@ -908,17 +944,13 @@ private fun HomeTopBar(model: AccountModel, onSettings: (() -> Unit)?) {
 @Composable
 private fun DonorLanding(model: AccountModel, home: @Composable () -> Unit = {}) {
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.Center) {
-        Text("DAD", style = MaterialTheme.typography.displayMedium, modifier = Modifier.dadHeading())
-        Spacer(Modifier.height(16.dp))
-        Text("Good things start together.", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
-        Spacer(Modifier.height(28.dp))
+        // The old "DAD / Good things start together. / Welcome, … / Your account has a home here."
+        // header is gone: the greeting now lives in the Home TopAppBar ("Hi, {publicName}"). Only the
+        // account sub-states (loading / unavailable / signed-out) keep an on-screen answer here.
         Column(Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
-            when (val state = model.state) {
+            when (model.state) {
                 AccountState.Loading -> { CircularProgressIndicator(); Text("Loading your account…") }
-                is AccountState.Ready -> {
-                    Text("Welcome, ${state.profile.publicName ?: "friend"}", style = MaterialTheme.typography.titleLarge)
-                    Text("Your account has a home here.")
-                }
+                is AccountState.Ready -> Unit // the Ready greeting moved to the TopAppBar title
                 AccountState.Unavailable -> {
                     Text("Your account is unavailable right now.", style = MaterialTheme.typography.titleLarge)
                     Text("Please try again in a moment.")
