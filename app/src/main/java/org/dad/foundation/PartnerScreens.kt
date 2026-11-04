@@ -11,6 +11,8 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,6 +23,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -54,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.core.graphics.scale
 import androidx.core.net.toUri
+import androidx.lifecycle.viewmodel.compose.viewModel
 import java.io.ByteArrayOutputStream
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -81,6 +85,8 @@ fun PartnerSignInFlow(
     onSignedIn: () -> Unit,
     /** The website's partner application (`<public origin>/apply`); null when no public origin is configured. */
     applyUrl: String? = null,
+    /** Where this install's partner application stands, when it holds a receipt for one; null hides the card. */
+    applicationStatus: ApplicationStatusService? = null,
 ) {
     LaunchedEffect(incomingToken) {
         val token = incomingToken ?: return@LaunchedEffect
@@ -98,6 +104,7 @@ fun PartnerSignInFlow(
                 phase is PartnerSignInPhase.Accepting || phase is PartnerSignInPhase.SignedIn ->
                     CircularProgressIndicator(modifier = Modifier.testTag("partner-signing-in"))
                 else -> {
+                    if (applicationStatus != null) ApplicationStatusCard(applicationStatus)
                     Text("We’ll email you a link to sign in to your organization’s portal.")
                     OutlinedTextField(
                         value = model.email, onValueChange = { model.email = it }, label = { Text("Work email") }, singleLine = true,
@@ -119,6 +126,28 @@ fun PartnerSignInFlow(
             }
             OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth().testTag("partner-back")) { Text("Back") }
         }
+    }
+}
+
+/** The applicant's status, shown above partner sign-in only when the server recognizes this install's receipt. */
+@Composable
+private fun ApplicationStatusCard(service: ApplicationStatusService) {
+    val model: ApplicationStatusModel = viewModel(
+        key = "partner-application-status", factory = ApplicationStatusModel.factory(service))
+    when (val phase = model.phase) {
+        is ApplicationStatusPhase.Loaded -> Column(
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+                .padding(16.dp).testTag("partner-application-status"),
+        ) {
+            Text(phase.info.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
+            Text(phase.info.message, modifier = Modifier.testTag("partner-application-message"))
+        }
+        is ApplicationStatusPhase.Failed -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ErrorLine(phase.message, "partner-application-error")
+            OutlinedButton(onClick = model::load, modifier = Modifier.testTag("partner-application-retry")) { Text("Try again") }
+        }
+        ApplicationStatusPhase.Loading, ApplicationStatusPhase.None -> Unit
     }
 }
 
@@ -177,9 +206,10 @@ fun PartnerPortal(model: PartnerModel, publicOrigin: String, onSignedOut: () -> 
             }
             snapshot == null -> CircularProgressIndicator(modifier = Modifier.testTag("partner-loading"))
             else -> {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                // Scrolls sideways so a long label ("Organization") or a large font keeps each tab on one line.
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                     PartnerSection.entries.forEach {
-                        FilterChip(selected = section == it, onClick = { section = it }, label = { Text(it.label) },
+                        FilterChip(selected = section == it, onClick = { section = it }, label = { Text(it.label, maxLines = 1, softWrap = false) },
                             modifier = Modifier.testTag("partner-tab-${it.name.lowercase()}"))
                     }
                 }

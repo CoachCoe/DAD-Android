@@ -59,6 +59,7 @@ fun UnauthenticatedStack(
     /** Claims a sign-in link pasted by the donor; false when the text is not a DAD sign-in link. */
     onPastedLink: (String) -> Boolean = { false },
     partnerSignIn: PartnerSignInService? = null,
+    applicationStatus: ApplicationStatusService? = null,
     /** A tapped partner sign-in link's token, accepted on the partner sign-in screen. */
     partnerToken: String? = null,
     onPartnerTokenConsumed: () -> Unit = {},
@@ -100,6 +101,7 @@ fun UnauthenticatedStack(
             incomingToken = partnerToken, onTokenConsumed = onPartnerTokenConsumed,
             onBack = { step = AuthStep.RoleSelect }, onSignedIn = onPartnerSignedIn,
             applyUrl = publicOrigin.takeIf { it.isNotBlank() }?.let { "${it.trimEnd('/')}/apply" },
+            applicationStatus = applicationStatus,
         ) else RoleSelect(PhoneSignInModel.NOT_CONFIGURED) { role -> if (role == AppRole.DONOR) step = AuthStep.Methods }
     }
 }

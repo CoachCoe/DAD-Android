@@ -27,7 +27,8 @@ import okio.Buffer
  * unless `stub_delete_blocked` (409), after which the account is gone (profile -> 401).
  * Contact details, email change, sessions, the employer link and the Wallet pass are scripted by [StubAccount].
  * The partner sign-in link and portal are scripted by [StubPartner]; `stub_partner_signed_in` starts with a stored
- * partner session.
+ * partner session; `stub_partner_viewer` makes the partner a read-only viewer, and `stub_application_pending` / `_approved` /
+ * `_rejected` / `_unknown` seed a stored application receipt the stub answers with that status.
  * `/analytics/events` accepts every batch; the analytics question starts answered "no" unless `stub_analytics_unset`.
  * `stub_push` links a push provider with a fixed token, which `/donor/me/push-device` accepts.
  * Events (`/donor/me/events`) are scripted by [StubEvents] (`stub_events_invited`, `stub_events_fail_first`, `stub_events_not_eligible`).
@@ -53,7 +54,7 @@ object DebugBackend {
 
     fun stub(context: Context, scope: CoroutineScope, options: LaunchOptions): AppServices? {
         if (!options.stubBackend) return null
-        val interceptor = StubInterceptor(options.stubDeleteBlocked, options.stubDashboard, options.stubGift, options.stubEvents, options.stubEngagement)
+        val interceptor = StubInterceptor(options.stubDeleteBlocked, options.stubDashboard, options.stubGift, options.stubEvents, options.stubEngagement, options.stubPartnerViewer, options.stubApplication)
         val analytics = AnalyticsUploader(
             MemoryAnalyticsConsent(choice = if (options.stubAnalyticsUnset) null else false),
             WireAnalytics(ORIGIN, access = { null }, OkHttpClient.Builder().addInterceptor(interceptor).build()), scope,
@@ -84,7 +85,11 @@ object DebugBackend {
             wallet = WireWalletPass(ProductClient(ORIGIN, session, http)),
             partner = PartnerSession(InMemoryCredentialStore(
                 if (options.stubPartnerSignedIn) Credentials("stub-partner-0", "", Long.MAX_VALUE) else null,
-            )).let { PartnerKit(it, WirePartnerAuth(ORIGIN, it, http), WirePartner(ORIGIN, it, http)) },
+            )).let {
+                PartnerKit(it, WirePartnerAuth(ORIGIN, it, http), WirePartner(ORIGIN, it, http), WireApplicationStatus(ORIGIN, InMemoryCredentialStore(
+                    options.stubApplication?.let { Credentials("stub-receipt-" + "r".repeat(31), "", Long.MAX_VALUE) },
+                ), http))
+            },
             analytics = analytics,
             push = WireDonorPush(ProductClient(ORIGIN, session, http)),
             pushTokens = if (options.stubPush) PushTokenProvider { STUB_PUSH_TOKEN } else null,
@@ -99,13 +104,13 @@ class InMemoryCredentialStore(private var value: Credentials? = null) : Credenti
     @Synchronized override fun clear() { value = null }
 }
 
-private class StubInterceptor(private val deletionBlocked: Boolean, scenario: StubDashboard, gift: StubGift, eventsScenario: StubEventsScenario, engagementScenario: StubEngagementScenario) : Interceptor {
+private class StubInterceptor(private val deletionBlocked: Boolean, scenario: StubDashboard, gift: StubGift, eventsScenario: StubEventsScenario, engagementScenario: StubEngagementScenario, partnerViewer: Boolean, application: String?) : Interceptor {
     private val home = StubDonorHome(scenario)
     private val giving = StubGiving(gift)
     private val events = StubEvents(eventsScenario)
     private val engagement = StubEngagement(engagementScenario)
     private val account = StubAccount()
-    private val partner = StubPartner()
+    private val partner = StubPartner(partnerViewer, application)
     private var generation = 0
     private var deleted = false
     private var version = 3
