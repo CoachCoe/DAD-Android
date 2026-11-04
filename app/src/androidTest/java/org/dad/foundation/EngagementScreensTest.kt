@@ -32,9 +32,9 @@ class EngagementScreensTest {
         override suspend fun initiativeSpend(id: String) = InitiativeSpend(0, emptyList())
     }
 
-    private fun show(service: EngagementService, sharer: RecordingSharer, origin: String = "https://dad.example") {
+    private fun show(service: EngagementService, sharer: RecordingSharer, origin: String = "https://dad.example", inviterName: String? = null) {
         val model = EngagementModel(service)
-        compose.setContent { EngagementHome(model, origin, ReferralShareAction(sharer)) }
+        compose.setContent { EngagementHome(model, origin, ReferralShareAction(sharer), inviterName = inviterName) }
         compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("invite-section")).fetchSemanticsNodes().isNotEmpty() }
     }
 
@@ -47,6 +47,14 @@ class EngagementScreensTest {
         assertTrue(sharer.copied.isEmpty())
     }
 
+    @Test fun invitePreviewNamesTheInviterOrStaysNeutral() {
+        show(Service(ReferralInfo("ALEX", 1, 0, emptyList())), RecordingSharer(), inviterName = "Alex")
+        compose.onNodeWithTag("invite-preview").assertTextContains("Alex invited you to DAD")
+    }
+    @Test fun invitePreviewIsNeutralWithoutAName() {
+        show(Service(ReferralInfo("ALEX", 1, 0, emptyList())), RecordingSharer())
+        compose.onNodeWithTag("invite-preview").assertTextContains("Your invite to DAD")
+    }
     @Test fun copyHandsTheClipboardTheBareLink() {
         val sharer = RecordingSharer()
         show(Service(ReferralInfo("ALEX", 1, 0, emptyList())), sharer)

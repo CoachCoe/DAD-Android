@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -53,6 +52,7 @@ import java.time.format.FormatStyle
 // so instead of drawing a zero, and nothing here logs.
 
 private val shortDate: DateTimeFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+private val longDate: DateTimeFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.LONG).withLocale(java.util.Locale.US)
 
 /** The unavailable-section line: one wording everywhere so a missing figure is never mistaken for none. */
 @Composable
@@ -73,6 +73,8 @@ fun EngagementHome(
     onSignedOut: () -> Unit = {},
     /** Adds the referral code to Google Wallet; null where Wallet is not wired (previews). */
     wallet: WalletPassModel? = null,
+    /** The donor's public name, for the invite preview; null or blank shows a neutral line. */
+    inviterName: String? = null,
 ) {
     LaunchedEffect(Unit) { model.load() }
     LaunchedEffect(model.signedOut) { if (model.signedOut) onSignedOut() }
@@ -101,7 +103,7 @@ fun EngagementHome(
                 Column(Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
                     model.actionError?.let { Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("engagement-action-error")) }
                 }
-                model.snapshot?.let { Content(model, it, publicOrigin, sharer, wallet, onShowQr = { showQr = true; sharer.codeShown() }) }
+                model.snapshot?.let { Content(model, it, publicOrigin, sharer, wallet, inviterName, onShowQr = { showQr = true; sharer.codeShown() }) }
             }
         }
     }
@@ -109,13 +111,25 @@ fun EngagementHome(
 
 @Composable
 private fun Content(
-    model: EngagementModel, snapshot: EngagementSnapshot, publicOrigin: String, sharer: ReferralShareAction, wallet: WalletPassModel?, onShowQr: () -> Unit,
+    model: EngagementModel, snapshot: EngagementSnapshot, publicOrigin: String, sharer: ReferralShareAction, wallet: WalletPassModel?,
+    inviterName: String?, onShowQr: () -> Unit,
 ) {
+    // Circle leads with the invite: what a friend will see, then the share actions, then the numbers.
+    InvitePreview(inviterName)
+    InviteCard(model, snapshot, publicOrigin, sharer, wallet, onShowQr)
     ImpactCard(snapshot.impact)
     BadgesSection(snapshot.badges)
     RankingsCard(model)
     NetworkCard(snapshot.network)
-    InviteCard(model, snapshot, publicOrigin, sharer, wallet, onShowQr)
+}
+
+@Composable
+private fun InvitePreview(inviterName: String?) {
+    HomeCard("invite-preview") {
+        val name = inviterName?.trim().orEmpty()
+        Text(if (name.isNotEmpty()) "$name invited you to DAD" else "Your invite to DAD", style = MaterialTheme.typography.titleMedium)
+        DadGiftFraming("$30/month", "$1 a day")
+    }
 }
 
 // MARK: impact (I-1, I-3)
@@ -176,8 +190,9 @@ private fun BadgeTile(badge: Badge, modifier: Modifier = Modifier) {
             },
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
+        if (badge.earned) DadSymbol("check", "Earned", tint = color) else DadSymbol("lock", "Locked", tint = color)
         Text(badge.shownTitle, style = MaterialTheme.typography.labelLarge, color = color)
-        Text(if (badge.earned) badge.earnedAt?.let { "Earned ${it.format(shortDate)}" } ?: "Earned" else "Locked", style = MaterialTheme.typography.labelSmall, color = color)
+        Text(if (badge.earned) badge.earnedAt?.let { "Earned ${it.format(longDate)}" } ?: "Earned" else "Locked", style = MaterialTheme.typography.labelSmall, color = color)
         if (!badge.earned) Text(badge.rule, style = MaterialTheme.typography.bodySmall)
         if (badge.perkActive) Text("Perk: ${badge.perk}", style = MaterialTheme.typography.bodySmall)
     }
@@ -252,19 +267,17 @@ private fun InviteCard(
 @Composable
 private fun Invite(referral: ReferralInfo, publicOrigin: String, sharer: ReferralShareAction, wallet: WalletPassModel?, onShowQr: () -> Unit) {
     var copied by remember { mutableStateOf(false) }
+    val haptics = rememberDadHaptics()
     Text("Your code: ${referral.code}", modifier = Modifier.testTag("referral-code"))
     referral.totalConverted?.let { total ->
         Text("$total ${if (total == 1L) "person has" else "people have"} joined through you", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("referral-total"))
     } ?: UnavailableLine("Your referral count", "referral-total-unavailable")
     val link = referral.link(publicOrigin)
     if (link != null) {
-        DadPrimaryButton("Share invite", Modifier.testTag("share-invite")) { sharer.share(referral.shareMessage(publicOrigin)) }
-        OutlinedButton(
-            onClick = { sharer.copy(link); copied = true },
-            modifier = Modifier.heightIn(min = 48.dp).testTag("copy-invite"),
-        ) { Text(if (copied) "Copied" else "Copy link") }
-        OutlinedButton(onClick = onShowQr, modifier = Modifier.heightIn(min = 48.dp).testTag("show-qr")) { Text("Show QR") }
+        DadPrimaryButton("Share invite", Modifier.testTag("share-invite")) { sharer.share(referral.shareMessage(publicOrigin)); haptics.confirm() }
+        DadSecondaryButton("Show QR", Modifier.testTag("show-qr"), onClick = onShowQr)
         wallet?.let { WalletPassButton(it) }
+        DadTextButton(if (copied) "Copied" else "Copy link", Modifier.testTag("copy-invite")) { sharer.copy(link); copied = true; haptics.confirm() }
         Text(link, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("invite-link"))
     } else {
         Text("Invite links aren’t available in this build.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("invite-unconfigured"))
@@ -301,11 +314,7 @@ private fun NamePrompt(model: EngagementModel) {
         modifier = Modifier.fillMaxWidth().testTag("name-field"),
     )
     model.nameError?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("name-error")) }
-    Button(
-        onClick = { model.choosePublicName(draft) },
-        enabled = !model.isSavingName && draft.isNotBlank(),
-        modifier = Modifier.heightIn(min = 48.dp).testTag("save-name"),
-    ) { Text("Create my invite link") }
+    DadPrimaryButton("Create my invite link", Modifier.testTag("save-name"), enabled = !model.isSavingName && draft.isNotBlank()) { model.choosePublicName(draft) }
 }
 
 /**

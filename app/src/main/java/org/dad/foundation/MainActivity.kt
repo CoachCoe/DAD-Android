@@ -29,7 +29,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
@@ -57,6 +60,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -926,6 +930,8 @@ private fun DonorShellTab(
                 sharer = remember { ReferralShareAction(AndroidReferralSharer(context), model.analytics) },
                 onSignedOut = { onSelectTab(DonorTab.HOME); model.onSignedOut() },
                 wallet = model.wallet?.let { viewModel<WalletPassModel>(key = "wallet-${model.generation}", factory = WalletPassModel.factory(it)) },
+
+                inviterName = (model.state as? AccountState.Ready)?.profile?.publicName,
             )
         }
         DonorTab.EVENTS -> if (eventsService != null) holder.SaveableStateProvider("events") {
@@ -1065,50 +1071,53 @@ private fun SettingsContent(
     onCancelGift: (() -> Unit)? = null, management: AccountManagementService? = null, generation: Int = 0, onSignedOut: (() -> Unit)? = null,
     analytics: AnalyticsUploader? = null,
 ) {
-    // Profile header — role is immutable (D-1), ZIP drives streak day rollover.
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(snapshot.profile.email, style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("settings-email"))
-        if (management == null) Text("ZIP: ${snapshot.profile.zipLabel}", style = MaterialTheme.typography.bodySmall)
-    }
+    // Sections group the account the way a donor thinks of it; Sign out and Delete sit apart at the bottom so a
+    // routine toggle is never next to a destructive action.
+    SettingsHeading("Profile")
+    // Role is immutable (D-1), ZIP drives streak day rollover. The ListItem is not clickable, so the tagged email
+    // text stays a node of its own.
+    ListItem(
+        headlineContent = { Text(snapshot.profile.email, style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("settings-email")) },
+        supportingContent = if (management == null) ({ Text("ZIP: ${snapshot.profile.zipLabel}") }) else null,
+        leadingContent = { DadSymbol("person", "", Modifier.clearAndSetSemantics {}) },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+    )
     if (management != null) {
         EmailChangeSection(viewModel(key = "email-change-$generation", factory = EmailChangeModel.factory(snapshot.profile.email, management)))
         ProfileDetailsSection(viewModel(key = "details-$generation", factory = ProfileDetailsModel.factory(snapshot.profile, management)))
     }
-
-    // Notification toggles (§6.11) — email then push categories. Payment-failure email is absent
-    // by design (non-toggleable server-side).
+    SettingsHeading("Notifications")
+    // Payment-failure email is absent by design (non-toggleable server-side).
     SettingsToggleSection("Emails", snapshot.preferences.emailToggles, model)
     SettingsToggleSection("Notifications", snapshot.preferences.pushToggles, model)
-
-    // Privacy / participation switches.
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("Privacy", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
-        ToggleRow("Show my ranking", snapshot.preferences.showRanking, "ranking-toggle") {
+    SettingsHeading("Privacy")
+    Column {
+        ToggleRow("Show my ranking", snapshot.preferences.showRanking, "ranking-toggle", "star") {
             model.toggle("rankings_opted_out", !it) // inverted: showing = not opted out
         }
-        ToggleRow("Network visible", snapshot.preferences.networkVisible, "network-toggle") {
+        ToggleRow("Network visible", snapshot.preferences.networkVisible, "network-toggle", "person") {
             model.toggle("network_visible", it)
         }
-        ToggleRow("Volunteer opt-in", snapshot.preferences.volunteer, "volunteer-toggle") {
+        ToggleRow("Volunteer opt-in", snapshot.preferences.volunteer, "volunteer-toggle", "calendar") {
             model.toggle("volunteer", it)
         }
         if (analytics != null) {
-            ToggleRow("Usage analytics", analytics.choice == true, "analytics-toggle") { analytics.choose(it) }
-            Text("First-party only: a temporary journey ID measures signup, sharing and giving. No names, email addresses or " +
-                "payment details are sent.", style = MaterialTheme.typography.bodySmall)
+            ToggleRow("Usage analytics", analytics.choice == true, "analytics-toggle", "shield") { analytics.choose(it) }
         }
     }
-
-    password?.let { PasswordSection(it) }
-
-    if (management != null) {
-        EmployerSection(viewModel(key = "employer-$generation", factory = EmployerModel.factory(management)))
-        SessionsSection(viewModel(key = "sessions-$generation", factory = DeviceSessionsModel.factory(management))) { onSignedOut?.invoke() }
+    if (analytics != null) {
+        Text("First-party only: a temporary journey ID measures signup, sharing and giving. No names, email addresses or " +
+            "payment details are sent.", style = MaterialTheme.typography.bodySmall)
     }
-
-    // Sign out.
+    if (password != null || management != null) SettingsHeading("Security")
+    password?.let { PasswordSection(it) }
+    if (management != null) {
+        SessionsSection(viewModel(key = "sessions-$generation", factory = DeviceSessionsModel.factory(management))) { onSignedOut?.invoke() }
+        SettingsHeading("Account")
+        EmployerSection(viewModel(key = "employer-$generation", factory = EmployerModel.factory(management)))
+    }
+    HorizontalDivider()
     DadSecondaryButton("Sign out", modifier = Modifier.testTag("settings-signout")) { model.signOut() }
-
     // Delete account (store-mandated, §6.12): a typed-word confirm gate, inline.
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("Delete account", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
@@ -1139,21 +1148,25 @@ private fun SettingsContent(
 @Composable
 private fun SettingsToggleSection(title: String, toggles: List<Preferences.Toggle>, model: SettingsModel) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium)
-        toggles.forEach { t -> ToggleRow(t.label, t.value, "pref-${t.key}") { model.toggle(t.key, it) } }
+        Text(title, style = MaterialTheme.typography.titleSmall)
+        toggles.forEach { t -> ToggleRow(t.label, t.value, "pref-${t.key}", "bell") { model.toggle(t.key, it) } }
     }
 }
 
 @Composable
-private fun ToggleRow(label: String, value: Boolean, tag: String, onChange: (Boolean) -> Unit) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().testTag(tag)
-            .toggleable(value = value, role = Role.Switch, onValueChange = onChange),
-    ) {
-        Text(label, modifier = Modifier.weight(1f))
-        Switch(checked = value, onCheckedChange = null)
-    }
+private fun SettingsHeading(title: String) {
+    Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.dadHeading())
 }
 
-
+@Composable
+private fun ToggleRow(label: String, value: Boolean, tag: String, icon: String, onChange: (Boolean) -> Unit) {
+    // Tag and toggle state share one node (the ListItem); the Switch itself is display-only.
+    ListItem(
+        headlineContent = { Text(label) },
+        leadingContent = { DadSymbol(icon, "", Modifier.clearAndSetSemantics {}) },
+        trailingContent = { Switch(checked = value, onCheckedChange = null) },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        modifier = Modifier.fillMaxWidth().testTag(tag)
+            .toggleable(value = value, role = Role.Switch, onValueChange = onChange),
+    )
+}
