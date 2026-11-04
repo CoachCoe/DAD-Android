@@ -84,7 +84,6 @@ private fun EventList(model: EventsModel, onClose: (() -> Unit)?, onOpen: (Strin
         modifier = Modifier.fillMaxHeight().wrapContentWidth(Alignment.Start).widthIn(max = 640.dp).fillMaxWidth().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp).testTag("events-home"),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        if (onClose != null) OutlinedButton(onClick = onClose, modifier = Modifier.heightIn(min = 48.dp).testTag("events-back")) { Text("Back") }
         Text("Events & volunteering", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
         when (val phase = model.phase) {
             is EventsPhase.Loading -> CircularProgressIndicator(modifier = Modifier.testTag("events-loading"))

@@ -126,7 +126,6 @@ fun GiftScreen(model: GivingModel, stubComplete: ((HostedHandoff.Purpose) -> Uni
         modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp).testTag("gift-screen"),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        if (onClose != null) DadSecondaryButton("Close", modifier = Modifier.testTag("gift-close")) { onClose() }
         Text(
             giftHeading(model.hasLoaded, model.recurring),
             style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading(),

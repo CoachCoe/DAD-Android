@@ -19,9 +19,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -87,7 +89,6 @@ fun EngagementHome(
         modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp).testTag("engagement-home"),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        if (onClose != null) OutlinedButton(onClick = onClose, modifier = Modifier.heightIn(min = 48.dp).testTag("engagement-close")) { Text("Close") }
         Text("Your impact", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
         when (val phase = model.phase) {
             EngagementPhase.Loading -> CircularProgressIndicator(modifier = Modifier.testTag("engagement-loading"))
@@ -311,25 +312,32 @@ private fun NamePrompt(model: EngagementModel) {
  * The full-screen IRL code (R-1, R-2): a QR of the in-person link, drawn locally from ZXing's matrix so no image is
  * fetched and no untrusted file is parsed. Meant to be scanned from a phone screen face to face.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun InviteQrScreen(link: String, onClose: () -> Unit) {
     val bitmap = remember(link) { runCatching { qrBitmap(link) }.getOrNull() }
-    Column(
-        modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp).testTag("qr-screen"),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        OutlinedButton(onClick = onClose, modifier = Modifier.heightIn(min = 48.dp).testTag("qr-close")) { Text("Close") }
-        Text("Show this code", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
-        if (bitmap != null) {
-            Image(
-                bitmap = bitmap.asImageBitmap(), contentDescription = "QR code for your invite link", filterQuality = FilterQuality.None,
-                modifier = Modifier.widthIn(max = 320.dp).fillMaxWidth().background(Color.White).padding(16.dp).testTag("qr-code"),
-            )
-        } else {
-            Text("The code couldn’t be drawn. Share your link instead.", modifier = Modifier.testTag("qr-failed"))
+    // The QR is a pushed sub-screen of Circle: its back arrow (carrying the moved `qr-close` tag) lives in
+    // a TopAppBar via DadBackBar, replacing the former inline Close button. BackHandler is wired by the caller.
+    Scaffold(
+        topBar = { DadBackBar("qr-close", "Back", onBack = onClose) },
+        containerColor = MaterialTheme.colorScheme.background,
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(innerPadding).safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp).testTag("qr-screen"),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text("Show this code", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(), contentDescription = "QR code for your invite link", filterQuality = FilterQuality.None,
+                    modifier = Modifier.widthIn(max = 320.dp).fillMaxWidth().background(Color.White).padding(16.dp).testTag("qr-code"),
+                )
+            } else {
+                Text("The code couldn’t be drawn. Share your link instead.", modifier = Modifier.testTag("qr-failed"))
+            }
+            Text("A friend scans it with their phone camera to open your invite.", style = MaterialTheme.typography.bodySmall)
         }
-        Text("A friend scans it with their phone camera to open your invite.", style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -342,19 +350,24 @@ internal fun qrBitmap(contents: String): Bitmap {
 }
 
 /** "See every dollar this initiative has spent" (A-3): spend by category, totals only (PRD §5.2). */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InitiativeSpendScreen(model: InitiativeSpendModel, title: String, onClose: () -> Unit, onSignedOut: () -> Unit = {}) {
     LaunchedEffect(Unit) { model.load() }
     LaunchedEffect(model.signedOut) { if (model.signedOut) onSignedOut() }
-    BackHandler(onBack = onClose)
-    Column(
-        modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp).testTag("spend-screen"),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        OutlinedButton(onClick = onClose, modifier = Modifier.heightIn(min = 48.dp).testTag("spend-close")) { Text("Close") }
-        Text("Where the money went", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
-        Text(title, style = MaterialTheme.typography.titleMedium)
-        when (val phase = model.phase) {
+    // The spend drill-in is a pushed screen: its back arrow (the moved `spend-close` tag) is in the
+    // TopAppBar. BackHandler is wired by the shell that pushed it.
+    Scaffold(
+        topBar = { DadBackBar("spend-close", "Back", onBack = onClose) },
+        containerColor = MaterialTheme.colorScheme.background,
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(innerPadding).safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp).testTag("spend-screen"),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text("Where the money went", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            when (val phase = model.phase) {
             InitiativeSpendModel.Phase.Loading -> CircularProgressIndicator(modifier = Modifier.testTag("spend-loading"))
             InitiativeSpendModel.Phase.Unpublished -> Text("This initiative’s spending hasn’t been published yet.", modifier = Modifier.testTag("spend-unpublished"))
             is InitiativeSpendModel.Phase.Failed -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -374,6 +387,7 @@ fun InitiativeSpendScreen(model: InitiativeSpendModel, title: String, onClose: (
                     }
                 }
                 Text("Totals by category, not individual payments.", style = MaterialTheme.typography.bodySmall)
+            }
             }
         }
     }

@@ -258,7 +258,6 @@ fun GiftHistoryScreen(model: GiftHistoryModel, onClose: () -> Unit, onSignedOut:
     ) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 16.dp)) {
-                OutlinedButton(onClick = onClose, modifier = Modifier.heightIn(min = 48.dp).testTag("history-close")) { Text("Close") }
                 Text("Gift history", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
                 model.summary?.let { summary ->
                     HomeCard("history-summary") {
