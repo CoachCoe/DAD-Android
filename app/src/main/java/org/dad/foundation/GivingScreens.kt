@@ -339,20 +339,26 @@ private fun StepButton(symbol: String, description: String, tag: String, enabled
 
 @Composable
 private fun PaymentSection(model: GivingModel) {
-    ListItem(
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        leadingContent = { Box(Modifier.clearAndSetSemantics {}) { DadSymbol("card", "Card") } },
-        headlineContent = { Text("Payment method", style = MaterialTheme.typography.titleMedium) },
-        supportingContent = { Text(paymentLine(model.payment), style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("payment-status")) },
-        // Not clickable as a whole: a clickable ListItem would merge payment-status away from tests.
-        trailingContent = if (model.recurring is RecurringState.Active) ({
+    // A plain Row, not a ListItem: ListItem always merges its descendants, which folds payment-status and the
+    // update-payment button into one node.
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.clearAndSetSemantics {}) { DadSymbol("card", "Card") }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Payment method", style = MaterialTheme.typography.titleMedium)
+            Text(paymentLine(model.payment), style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("payment-status"))
+        }
+        if (model.recurring is RecurringState.Active) {
             IconButton(
                 onClick = { model.updatePayment() },
                 enabled = !model.isBusy,
                 modifier = Modifier.size(48.dp).testTag("update-payment").semantics { contentDescription = "Update payment method" },
             ) { Box(Modifier.clearAndSetSemantics {}) { DadSymbol("chevron", "Update payment method") } }
-        }) else null,
-    )
+        }
+    }
 }
 
 @Composable

@@ -125,7 +125,8 @@ private fun Content(
 
 @Composable
 private fun InvitePreview(inviterName: String?) {
-    HomeCard("invite-preview") {
+    // One merged node: the card reads as a single preview, and its text belongs to the tagged card.
+    HomeCard("invite-preview", Modifier.semantics(mergeDescendants = true) {}) {
         val name = inviterName?.trim().orEmpty()
         Text(if (name.isNotEmpty()) "$name invited you to DAD" else "Your invite to DAD", style = MaterialTheme.typography.titleMedium)
         DadGiftFraming("$30/month", "$1 a day")

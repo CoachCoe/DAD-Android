@@ -727,17 +727,12 @@ private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaun
     // A pushed screen is modal over the tabs: it shows its own back-arrow app bar and hides the
     // NavigationBar, matching the prior "a pushed screen covers the shell" behaviour.
     val onShell = pushed == null
-    if (giving != null && celebrating) {
-        BackHandler { giving.acknowledgeCelebration() }
-        val amount = giving.selection
-        FirstGiftCelebration(
-            amountMonthly = formatUsdMinor(amount.monthlyMinor) + "/month",
-            amountDaily = "$${amount.dailyDollars} a day",
-            founding = dash?.foundingDonor == true,
-            onInvite = { giving.acknowledgeCelebration(); pushed = null; tab = DonorTab.CIRCLE },
-            onDone = { giving.acknowledgeCelebration() },
-        )
-    } else Scaffold(
+    // The celebration is drawn OVER the shell rather than replacing it: leaving composition would re-run
+    // the Gift screen's load on return and wipe its "Your gift is set up." notice. While it shows, the
+    // shell underneath is hidden from accessibility (the opaque Surface already blocks touches).
+    Box(Modifier.fillMaxSize()) {
+    Scaffold(
+        modifier = if (giving != null && celebrating) Modifier.clearAndSetSemantics {} else Modifier,
         topBar = {
             when (pushed) {
                 Pushed.Settings -> DadBackBar("settings-back", "Back") { pushed = null }
@@ -868,6 +863,18 @@ private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaun
                 )
             }
         }
+    }
+    if (giving != null && celebrating) {
+        BackHandler { giving.acknowledgeCelebration() }
+        val amount = giving.selection
+        FirstGiftCelebration(
+            amountMonthly = formatUsdMinor(amount.monthlyMinor) + "/month",
+            amountDaily = "$${amount.dailyDollars} a day",
+            founding = dash?.foundingDonor == true,
+            onInvite = { giving.acknowledgeCelebration(); pushed = null; tab = DonorTab.CIRCLE },
+            onDone = { giving.acknowledgeCelebration() },
+        )
+    }
     }
 
     // The analytics question is asked ONCE, after the first sign-in (moved off the Welcome screen) — the
@@ -1074,14 +1081,19 @@ private fun SettingsContent(
     // Sections group the account the way a donor thinks of it; Sign out and Delete sit apart at the bottom so a
     // routine toggle is never next to a destructive action.
     SettingsHeading("Profile")
-    // Role is immutable (D-1), ZIP drives streak day rollover. The ListItem is not clickable, so the tagged email
-    // text stays a node of its own.
-    ListItem(
-        headlineContent = { Text(snapshot.profile.email, style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("settings-email")) },
-        supportingContent = if (management == null) ({ Text("ZIP: ${snapshot.profile.zipLabel}") }) else null,
-        leadingContent = { DadSymbol("person", "", Modifier.clearAndSetSemantics {}) },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-    )
+    // Role is immutable (D-1), ZIP drives streak day rollover. A plain Row, not a ListItem: ListItem always merges
+    // its descendants, which would fold the tagged email text into the row.
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        DadSymbol("person", "", Modifier.clearAndSetSemantics {})
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(snapshot.profile.email, style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("settings-email"))
+            if (management == null) Text("ZIP: ${snapshot.profile.zipLabel}", style = MaterialTheme.typography.bodyMedium)
+        }
+    }
     if (management != null) {
         EmailChangeSection(viewModel(key = "email-change-$generation", factory = EmailChangeModel.factory(snapshot.profile.email, management)))
         ProfileDetailsSection(viewModel(key = "details-$generation", factory = ProfileDetailsModel.factory(snapshot.profile, management)))
