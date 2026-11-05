@@ -46,15 +46,17 @@ class StubBackendFlowTest {
         waitFor("method-phone")
         compose.tapSafely("method-phone")
         waitFor("phone-input")
-        compose.enterText("phone-input", "+14155551234")
+        // The phone field is prefilled with the "+1 " country code, so REPLACE the field rather than
+        // append to it (an append would produce "+1 +1415…", which fails the E.164 check).
+        compose.enterText("phone-input", "+14155551234", replace = true)
         compose.waitForIdle()
         waitEnabled("send-code")
         compose.tapSafely("send-code")
         waitFor("code-input")
-        compose.enterText("code-input", code)
+        // A complete 6-digit code submits by itself (and hides the keyboard / leaves the screen), so there is
+        // no keyboard to settle and no Verify button left to tap.
+        compose.enterText("code-input", code, settleAfter = false)
         compose.waitForIdle()
-        waitEnabled("verify-code")
-        compose.tapSafely("verify-code")
     }
 
     private fun deleteAccount() {
@@ -153,6 +155,10 @@ class StubBackendFlowTest {
     @Test fun theAnalyticsQuestionIsAskedOnceAndAnsweringYesSendsAnEvent() {
         DebugBackend.resetRequestLog()
         launch("stub_analytics_unset").use {
+            // The analytics question moved off Welcome: it is now a ModalBottomSheet shown ONCE after the
+            // first sign-in. So sign in first, then expect analytics-choice, allow it, and confirm an event
+            // is uploaded. Same copy/options/tags; only WHEN it appears changed.
+            signIn("123456")
             waitFor("analytics-choice")
             compose.tapSafely("analytics-allow")
             compose.waitUntil(15_000) { compose.onAllNodes(hasTestTag("analytics-choice")).fetchSemanticsNodes().isEmpty() }

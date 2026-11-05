@@ -17,11 +17,12 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -51,6 +52,7 @@ import java.time.format.FormatStyle
 // so instead of drawing a zero, and nothing here logs.
 
 private val shortDate: DateTimeFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+private val longDate: DateTimeFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.LONG).withLocale(java.util.Locale.US)
 
 /** The unavailable-section line: one wording everywhere so a missing figure is never mistaken for none. */
 @Composable
@@ -71,6 +73,8 @@ fun EngagementHome(
     onSignedOut: () -> Unit = {},
     /** Adds the referral code to Google Wallet; null where Wallet is not wired (previews). */
     wallet: WalletPassModel? = null,
+    /** The donor's public name, for the invite preview; null or blank shows a neutral line. */
+    inviterName: String? = null,
 ) {
     LaunchedEffect(Unit) { model.load() }
     LaunchedEffect(model.signedOut) { if (model.signedOut) onSignedOut() }
@@ -87,7 +91,6 @@ fun EngagementHome(
         modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp).testTag("engagement-home"),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        if (onClose != null) OutlinedButton(onClick = onClose, modifier = Modifier.heightIn(min = 48.dp).testTag("engagement-close")) { Text("Close") }
         Text("Your impact", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
         when (val phase = model.phase) {
             EngagementPhase.Loading -> CircularProgressIndicator(modifier = Modifier.testTag("engagement-loading"))
@@ -100,7 +103,7 @@ fun EngagementHome(
                 Column(Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
                     model.actionError?.let { Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("engagement-action-error")) }
                 }
-                model.snapshot?.let { Content(model, it, publicOrigin, sharer, wallet, onShowQr = { showQr = true; sharer.codeShown() }) }
+                model.snapshot?.let { Content(model, it, publicOrigin, sharer, wallet, inviterName, onShowQr = { showQr = true; sharer.codeShown() }) }
             }
         }
     }
@@ -108,13 +111,26 @@ fun EngagementHome(
 
 @Composable
 private fun Content(
-    model: EngagementModel, snapshot: EngagementSnapshot, publicOrigin: String, sharer: ReferralShareAction, wallet: WalletPassModel?, onShowQr: () -> Unit,
+    model: EngagementModel, snapshot: EngagementSnapshot, publicOrigin: String, sharer: ReferralShareAction, wallet: WalletPassModel?,
+    inviterName: String?, onShowQr: () -> Unit,
 ) {
+    // Circle leads with the invite: what a friend will see, then the share actions, then the numbers.
+    InvitePreview(inviterName)
+    InviteCard(model, snapshot, publicOrigin, sharer, wallet, onShowQr)
     ImpactCard(snapshot.impact)
     BadgesSection(snapshot.badges)
     RankingsCard(model)
     NetworkCard(snapshot.network)
-    InviteCard(model, snapshot, publicOrigin, sharer, wallet, onShowQr)
+}
+
+@Composable
+private fun InvitePreview(inviterName: String?) {
+    // One merged node: the card reads as a single preview, and its text belongs to the tagged card.
+    HomeCard("invite-preview", Modifier.semantics(mergeDescendants = true) {}) {
+        val name = inviterName?.trim().orEmpty()
+        Text(if (name.isNotEmpty()) "$name invited you to DAD" else "Your invite to DAD", style = MaterialTheme.typography.titleMedium)
+        DadGiftFraming("$30/month", "$1 a day")
+    }
 }
 
 // MARK: impact (I-1, I-3)
@@ -175,8 +191,9 @@ private fun BadgeTile(badge: Badge, modifier: Modifier = Modifier) {
             },
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
+        if (badge.earned) DadSymbol("check", "Earned", tint = color) else DadSymbol("lock", "Locked", tint = color)
         Text(badge.shownTitle, style = MaterialTheme.typography.labelLarge, color = color)
-        Text(if (badge.earned) badge.earnedAt?.let { "Earned ${it.format(shortDate)}" } ?: "Earned" else "Locked", style = MaterialTheme.typography.labelSmall, color = color)
+        Text(if (badge.earned) badge.earnedAt?.let { "Earned ${it.format(longDate)}" } ?: "Earned" else "Locked", style = MaterialTheme.typography.labelSmall, color = color)
         if (!badge.earned) Text(badge.rule, style = MaterialTheme.typography.bodySmall)
         if (badge.perkActive) Text("Perk: ${badge.perk}", style = MaterialTheme.typography.bodySmall)
     }
@@ -251,19 +268,17 @@ private fun InviteCard(
 @Composable
 private fun Invite(referral: ReferralInfo, publicOrigin: String, sharer: ReferralShareAction, wallet: WalletPassModel?, onShowQr: () -> Unit) {
     var copied by remember { mutableStateOf(false) }
+    val haptics = rememberDadHaptics()
     Text("Your code: ${referral.code}", modifier = Modifier.testTag("referral-code"))
     referral.totalConverted?.let { total ->
         Text("$total ${if (total == 1L) "person has" else "people have"} joined through you", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("referral-total"))
     } ?: UnavailableLine("Your referral count", "referral-total-unavailable")
     val link = referral.link(publicOrigin)
     if (link != null) {
-        DadPrimaryButton("Share invite", Modifier.testTag("share-invite")) { sharer.share(referral.shareMessage(publicOrigin)) }
-        OutlinedButton(
-            onClick = { sharer.copy(link); copied = true },
-            modifier = Modifier.heightIn(min = 48.dp).testTag("copy-invite"),
-        ) { Text(if (copied) "Copied" else "Copy link") }
-        OutlinedButton(onClick = onShowQr, modifier = Modifier.heightIn(min = 48.dp).testTag("show-qr")) { Text("Show QR") }
+        DadPrimaryButton("Share invite", Modifier.testTag("share-invite")) { sharer.share(referral.shareMessage(publicOrigin)); haptics.confirm() }
+        DadSecondaryButton("Show QR", Modifier.testTag("show-qr"), onClick = onShowQr)
         wallet?.let { WalletPassButton(it) }
+        DadTextButton(if (copied) "Copied" else "Copy link", Modifier.testTag("copy-invite")) { sharer.copy(link); copied = true; haptics.confirm() }
         Text(link, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("invite-link"))
     } else {
         Text("Invite links aren’t available in this build.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("invite-unconfigured"))
@@ -300,36 +315,39 @@ private fun NamePrompt(model: EngagementModel) {
         modifier = Modifier.fillMaxWidth().testTag("name-field"),
     )
     model.nameError?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("name-error")) }
-    Button(
-        onClick = { model.choosePublicName(draft) },
-        enabled = !model.isSavingName && draft.isNotBlank(),
-        modifier = Modifier.heightIn(min = 48.dp).testTag("save-name"),
-    ) { Text("Create my invite link") }
+    DadPrimaryButton("Create my invite link", Modifier.testTag("save-name"), enabled = !model.isSavingName && draft.isNotBlank()) { model.choosePublicName(draft) }
 }
 
 /**
  * The full-screen IRL code (R-1, R-2): a QR of the in-person link, drawn locally from ZXing's matrix so no image is
  * fetched and no untrusted file is parsed. Meant to be scanned from a phone screen face to face.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun InviteQrScreen(link: String, onClose: () -> Unit) {
     val bitmap = remember(link) { runCatching { qrBitmap(link) }.getOrNull() }
-    Column(
-        modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp).testTag("qr-screen"),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        OutlinedButton(onClick = onClose, modifier = Modifier.heightIn(min = 48.dp).testTag("qr-close")) { Text("Close") }
-        Text("Show this code", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
-        if (bitmap != null) {
-            Image(
-                bitmap = bitmap.asImageBitmap(), contentDescription = "QR code for your invite link", filterQuality = FilterQuality.None,
-                modifier = Modifier.widthIn(max = 320.dp).fillMaxWidth().background(Color.White).padding(16.dp).testTag("qr-code"),
-            )
-        } else {
-            Text("The code couldn’t be drawn. Share your link instead.", modifier = Modifier.testTag("qr-failed"))
+    // The QR is a pushed sub-screen of Circle: its back arrow (carrying the moved `qr-close` tag) lives in
+    // a TopAppBar via DadBackBar, replacing the former inline Close button. BackHandler is wired by the caller.
+    Scaffold(
+        topBar = { DadBackBar("qr-close", "Back", onBack = onClose) },
+        containerColor = MaterialTheme.colorScheme.background,
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(innerPadding).safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp).testTag("qr-screen"),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text("Show this code", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(), contentDescription = "QR code for your invite link", filterQuality = FilterQuality.None,
+                    modifier = Modifier.widthIn(max = 320.dp).fillMaxWidth().background(Color.White).padding(16.dp).testTag("qr-code"),
+                )
+            } else {
+                Text("The code couldn’t be drawn. Share your link instead.", modifier = Modifier.testTag("qr-failed"))
+            }
+            Text("A friend scans it with their phone camera to open your invite.", style = MaterialTheme.typography.bodySmall)
         }
-        Text("A friend scans it with their phone camera to open your invite.", style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -342,19 +360,24 @@ internal fun qrBitmap(contents: String): Bitmap {
 }
 
 /** "See every dollar this initiative has spent" (A-3): spend by category, totals only (PRD §5.2). */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InitiativeSpendScreen(model: InitiativeSpendModel, title: String, onClose: () -> Unit, onSignedOut: () -> Unit = {}) {
     LaunchedEffect(Unit) { model.load() }
     LaunchedEffect(model.signedOut) { if (model.signedOut) onSignedOut() }
-    BackHandler(onBack = onClose)
-    Column(
-        modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp).testTag("spend-screen"),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        OutlinedButton(onClick = onClose, modifier = Modifier.heightIn(min = 48.dp).testTag("spend-close")) { Text("Close") }
-        Text("Where the money went", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
-        Text(title, style = MaterialTheme.typography.titleMedium)
-        when (val phase = model.phase) {
+    // The spend drill-in is a pushed screen: its back arrow (the moved `spend-close` tag) is in the
+    // TopAppBar. BackHandler is wired by the shell that pushed it.
+    Scaffold(
+        topBar = { DadBackBar("spend-close", "Back", onBack = onClose) },
+        containerColor = MaterialTheme.colorScheme.background,
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(innerPadding).safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp).testTag("spend-screen"),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text("Where the money went", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            when (val phase = model.phase) {
             InitiativeSpendModel.Phase.Loading -> CircularProgressIndicator(modifier = Modifier.testTag("spend-loading"))
             InitiativeSpendModel.Phase.Unpublished -> Text("This initiative’s spending hasn’t been published yet.", modifier = Modifier.testTag("spend-unpublished"))
             is InitiativeSpendModel.Phase.Failed -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -374,6 +397,7 @@ fun InitiativeSpendScreen(model: InitiativeSpendModel, title: String, onClose: (
                     }
                 }
                 Text("Totals by category, not individual payments.", style = MaterialTheme.typography.bodySmall)
+            }
             }
         }
     }

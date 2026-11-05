@@ -1,6 +1,8 @@
 package org.dad.foundation
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -9,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -16,6 +19,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -23,9 +27,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.contentType
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
@@ -51,6 +59,8 @@ fun UnauthenticatedStack(
     /** Claims a sign-in link pasted by the donor; false when the text is not a DAD sign-in link. */
     onPastedLink: (String) -> Boolean = { false },
     partnerSignIn: PartnerSignInService? = null,
+    applicationStatus: ApplicationStatusService? = null,
+    applicationSubmit: PartnerApplicationService? = null,
     /** A tapped partner sign-in link's token, accepted on the partner sign-in screen. */
     partnerToken: String? = null,
     onPartnerTokenConsumed: () -> Unit = {},
@@ -66,7 +76,7 @@ fun UnauthenticatedStack(
         else AuthStep.RoleSelect
     }
     when (step) {
-        AuthStep.RoleSelect -> RoleSelect(notice, analytics, invitation) { role ->
+        AuthStep.RoleSelect -> RoleSelect(notice, invitation) { role ->
             analytics?.emit(AnalyticsEvent.Plain(PlainEvent.ROLE_SELECTED))
             step = if (role == AppRole.DONOR) AuthStep.Methods else AuthStep.Partner
         }
@@ -92,6 +102,8 @@ fun UnauthenticatedStack(
             incomingToken = partnerToken, onTokenConsumed = onPartnerTokenConsumed,
             onBack = { step = AuthStep.RoleSelect }, onSignedIn = onPartnerSignedIn,
             applyUrl = publicOrigin.takeIf { it.isNotBlank() }?.let { "${it.trimEnd('/')}/apply" },
+            applicationStatus = applicationStatus,
+            applicationSubmit = applicationSubmit,
         ) else RoleSelect(PhoneSignInModel.NOT_CONFIGURED) { role -> if (role == AppRole.DONOR) step = AuthStep.Methods }
     }
 }
@@ -104,37 +116,87 @@ internal fun AuthColumn(tag: String, content: @Composable () -> Unit) {
     ) { content() }
 }
 
+/** The DAD brand mark as a small rounded tile (brand fill, ink "D"): a shape + letter, not colour alone,
+ *  with a description so TalkBack names the mark. No icon dependency is added. */
+@Composable
+private fun BrandTile() {
+    Box(
+        modifier = Modifier
+            .background(DadTheme.color("brand"), RoundedCornerShape(DadTheme.radius("field")))
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .semantics { contentDescription = "DAD" },
+        contentAlignment = Alignment.Center,
+    ) { Text("D", style = MaterialTheme.typography.headlineMedium, color = DadTheme.color("ink")) }
+}
+
+/**
+ * Days remaining until the Founding-Donor deadline (end of day 2026-12-31 America/New_York), or null
+ * once that instant has passed so the line is dropped. One helper so the deadline is computed — and the
+ * line rendered — at most once per screen.
+ */
+internal fun foundingDaysRemaining(now: java.time.Instant = java.time.Instant.now()): Long? {
+    val zone = java.time.ZoneId.of("America/New_York")
+    val deadline = java.time.LocalDate.of(2026, 12, 31).atTime(23, 59, 59).atZone(zone).toInstant()
+    if (!now.isBefore(deadline)) return null
+    val days = java.time.Duration.between(now, deadline).toDays()
+    return days + 1 // count the current partial day as a full day remaining
+}
+
 /** Unauthenticated splash: pick a journey before signing in. Shows [notice] (a failed link, a revoked
  *  session, or an unconfigured build) so the reason for being here is never silent. */
 @Composable
-fun RoleSelect(notice: String?, analytics: AnalyticsUploader? = null, invitation: String? = null, onSelect: (AppRole) -> Unit) {
-    AuthColumn("role-select") {
-        Text("DAD", style = MaterialTheme.typography.displayMedium, modifier = Modifier.dadHeading())
-        Spacer(Modifier.height(16.dp))
-        Text("Good things start together.", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
-        if (notice != null) {
-            Spacer(Modifier.height(16.dp))
-            Text(notice, style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.testTag("auth-notice").semantics { liveRegion = LiveRegionMode.Polite })
-        }
-        if (invitation != null) {
-            Spacer(Modifier.height(16.dp))
-            Text(invitation, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.testTag("auth-invitation"))
-        }
-        Spacer(Modifier.height(28.dp))
-        DadPrimaryButton("I’m a donor", Modifier.testTag("role-donor")) { onSelect(AppRole.DONOR) }
-        Spacer(Modifier.height(12.dp))
-        DadPrimaryButton("I’m a partner", Modifier.testTag("role-partner")) { onSelect(AppRole.PARTNER) }
-        if (analytics != null && analytics.choice == null) {
+fun RoleSelect(notice: String?, invitation: String? = null, onSelect: (AppRole) -> Unit) {
+    // Welcome sits on the ink surface. Foreground tokens are AA on ink (asserted in ContrastTest):
+    // paper for the title, dkmut for the eyebrow/sub/founding line, brand for the primary fill.
+    Box(Modifier.fillMaxSize().background(DadTheme.color("ink"))) {
+        Column(
+            modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp).testTag("role-select"),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            BrandTile()
+            Spacer(Modifier.height(20.dp))
+            Text("Aid, delivered.", style = MaterialTheme.typography.labelLarge, color = DadTheme.color("dkmut"))
+            Spacer(Modifier.height(8.dp))
+            Text("A dollar a day. Every dollar on the record.", style = MaterialTheme.typography.headlineMedium,
+                color = DadTheme.color("paper"), modifier = Modifier.dadHeading())
+            Spacer(Modifier.height(12.dp))
+            Text("Give monthly, invite the people you know, and watch your circle grow.",
+                style = MaterialTheme.typography.bodyLarge, color = DadTheme.color("dkmut"))
+            // Founding-Donor line, computed days remaining; hidden after end-of-2026 New York time.
+            foundingDaysRemaining()?.let { days ->
+                Spacer(Modifier.height(12.dp))
+                Text("Founding Donor status closes in $days ${if (days == 1L) "day" else "days"}.",
+                    style = MaterialTheme.typography.bodyMedium, color = DadTheme.color("dkmut"),
+                    modifier = Modifier.testTag("founding-deadline"))
+            }
+            // KEEP the notice + invitation above the actions.
+            if (notice != null) {
+                Spacer(Modifier.height(16.dp))
+                Text(notice, style = MaterialTheme.typography.bodyMedium, color = DadTheme.color("paper"),
+                    modifier = Modifier.testTag("auth-notice").semantics { liveRegion = LiveRegionMode.Polite })
+            }
+            if (invitation != null) {
+                Spacer(Modifier.height(16.dp))
+                Text(invitation, style = MaterialTheme.typography.bodyLarge, color = DadTheme.color("paper"),
+                    modifier = Modifier.testTag("auth-invitation"))
+            }
             Spacer(Modifier.height(28.dp))
-            AnalyticsChoice(analytics)
+            // The screen's single filled primary. The DONOR branch leads to the sign-in methods (and
+            // from there to the signup flow retitled "Step 1 of 2 · About you").
+            DadPrimaryButton("Give $1 a day", Modifier.testTag("role-donor")) { onSelect(AppRole.DONOR) }
+            Spacer(Modifier.height(12.dp))
+            DadSecondaryButton("I already give — sign in", Modifier.fillMaxWidth()) { onSelect(AppRole.DONOR) }
+            Spacer(Modifier.height(8.dp))
+            DadTextButton("Partner organization? Sign in here", Modifier.testTag("role-partner")) { onSelect(AppRole.PARTNER) }
         }
     }
 }
 
-/** The first-launch analytics question, worded as on the website; the answer can be changed in Settings. */
+/** The analytics question, worded as on the website; the answer can be changed in Settings. Shown once
+ *  after the first sign-in (see the DonorShell bottom sheet), not on Welcome. The body is shared so the
+ *  copy, options and tags are reused verbatim wherever the question appears. */
 @Composable
-private fun AnalyticsChoice(analytics: AnalyticsUploader) {
+internal fun AnalyticsChoiceBody(analytics: AnalyticsUploader) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.testTag("analytics-choice")) {
         Text(ANALYTICS_EXPLAINER, style = MaterialTheme.typography.bodySmall)
         OutlinedButton(onClick = { analytics.choose(true) }, modifier = Modifier.fillMaxWidth().testTag("analytics-allow")) { Text("Allow usage analytics") }
@@ -151,22 +213,38 @@ private fun SignInMethods(
     external: ExternalSignInDeps, establish: Establish, generation: Int, onSignedIn: () -> Unit,
     onPhone: () -> Unit, onEmailLink: () -> Unit, onPassword: () -> Unit, onSignup: () -> Unit, onBack: () -> Unit,
 ) {
+    // "More options" holds the lower-emphasis methods; a configuration change keeps it open.
+    var moreOptions by rememberSaveable { mutableStateOf(false) }
     AuthColumn("sign-in-methods") {
-        Text("Sign in", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
+        Text("Welcome back", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
         Spacer(Modifier.height(20.dp))
-        DadPrimaryButton("Sign in with your phone", Modifier.testTag("method-phone"), onPhone)
+        // The screen's single filled primary.
+        DadPrimaryButton("Continue with phone", Modifier.testTag("method-phone"), onPhone)
         Spacer(Modifier.height(12.dp))
-        DadPrimaryButton("Email me a sign-in link", Modifier.testTag("method-email-link"), onEmailLink)
+        DadSecondaryButton("Email me a sign-in link", Modifier.fillMaxWidth().testTag("method-email-link"), onClick = onEmailLink)
         Spacer(Modifier.height(12.dp))
-        DadPrimaryButton("Sign in with email and password", Modifier.testTag("method-password"), onPassword)
-        Spacer(Modifier.height(12.dp))
-        ExternalMethods(external, establish, generation, onSignedIn)
-        Spacer(Modifier.height(20.dp))
-        Text("New to DAD?", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
-        Spacer(Modifier.height(8.dp))
-        DadPrimaryButton("Create an account", Modifier.testTag("method-signup"), onSignup)
-        Spacer(Modifier.height(12.dp))
-        Text("Already have a DAD sign-in link in your email? Open it on this phone to continue.", style = MaterialTheme.typography.bodyMedium)
+        DadTextButton(if (moreOptions) "Fewer options" else "More options", Modifier.testTag("more-options")) { moreOptions = !moreOptions }
+        if (moreOptions) {
+            Spacer(Modifier.height(8.dp))
+            DadSecondaryButton("Sign in with email and password", Modifier.fillMaxWidth().testTag("method-password"), onClick = onPassword)
+            Spacer(Modifier.height(12.dp))
+            // Google/passkey render only when available; the "not available yet" hint
+            // (external-unavailable) lives here under More options, not on the bare screen.
+            ExternalMethods(external, establish, generation, onSignedIn)
+        }
+        Spacer(Modifier.height(24.dp))
+        // "New to DAD?" is a small bottom card with a secondary "Get started".
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.medium,
+            color = DadTheme.color("card"),
+            border = androidx.compose.foundation.BorderStroke(1.dp, DadTheme.color("line")),
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("New to DAD?", style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
+                DadSecondaryButton("Get started", Modifier.fillMaxWidth().testTag("method-signup"), onClick = onSignup)
+            }
+        }
         Spacer(Modifier.height(12.dp))
         Button(onClick = onBack) { Text("Back") }
     }
@@ -177,27 +255,30 @@ private fun SignInMethods(
 @Composable
 private fun PhoneSignIn(model: PhoneSignInModel, onSignedIn: () -> Unit) {
     LaunchedEffect(model.phase) { if (model.phase == PhoneSignInPhase.SignedIn) onSignedIn() }
+    val busy = model.phase is PhoneSignInPhase.RequestingCode || model.phase is PhoneSignInPhase.Verifying
+    // A complete 6-digit code submits by itself (SMS-OTP autofill delivers all six at once); the
+    // explicit Verify button stays for accessibility and manual entry.
+    LaunchedEffect(model.code) { if (model.canVerify && !busy && model.isAwaitingCode) model.verify() }
     AuthColumn("phone-sign-in") {
         Text("Sign in with your phone", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
         Spacer(Modifier.height(16.dp))
-        val busy = model.phase is PhoneSignInPhase.RequestingCode || model.phase is PhoneSignInPhase.Verifying
         if (model.isAwaitingCode) {
             Text("Enter the 6-digit code we texted you.")
             OutlinedTextField(
                 value = model.code, onValueChange = { model.code = it.filter(Char::isDigit).take(6) },
                 label = { Text("Verification code") }, singleLine = true, enabled = !busy,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                modifier = Modifier.fillMaxWidth().testTag("code-input"),
+                modifier = Modifier.fillMaxWidth().testTag("code-input").semantics { contentType = ContentType.SmsOtpCode },
             )
             Spacer(Modifier.height(12.dp))
             DadPrimaryButton("Verify", Modifier.testTag("verify-code")) { if (model.canVerify && !busy) model.verify() }
         } else {
             OutlinedTextField(
-                value = model.phone, onValueChange = { model.phone = it.filter { c -> c.isDigit() || c == '+' }.take(16) },
+                value = model.phone, onValueChange = { model.phone = it.filter { c -> c.isDigit() || c == '+' || c == ' ' }.take(18) },
                 label = { Text("Phone number") }, singleLine = true, enabled = !busy,
-                supportingText = { Text("Include your country code, like +14155551234.") },
+                supportingText = { Text("Include your country code.") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                modifier = Modifier.fillMaxWidth().testTag("phone-input"),
+                modifier = Modifier.fillMaxWidth().testTag("phone-input").semantics { contentType = ContentType.PhoneNumber },
             )
             Spacer(Modifier.height(12.dp))
             DadPrimaryButton("Send code", Modifier.testTag("send-code")) { if (model.canRequestCode && !busy) model.requestCode() }

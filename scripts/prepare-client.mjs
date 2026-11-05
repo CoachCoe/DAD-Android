@@ -43,7 +43,7 @@ const allowed = new Set([
   "partnerUsers", "partnerInviteUser", "partnerRemoveUser",
   "partnerSaveProfile", "partnerLogo", "partnerSaveLogo",
   "partnerReport", "partnerExports", "partnerRetainedReport",
-  "partnerCompanyCode", "applicationStatus",
+  "partnerCompanyCode", "applicationStatus", "applyWithReceipt",
   "partnerRegisterPushDevice", "partnerUnregisterPushDevice",
 ]);
 for (const [path, item] of Object.entries(document.paths)) {

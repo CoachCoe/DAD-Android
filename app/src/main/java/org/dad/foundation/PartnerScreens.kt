@@ -11,6 +11,8 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,6 +23,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -54,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.core.graphics.scale
 import androidx.core.net.toUri
+import androidx.lifecycle.viewmodel.compose.viewModel
 import java.io.ByteArrayOutputStream
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -81,6 +85,10 @@ fun PartnerSignInFlow(
     onSignedIn: () -> Unit,
     /** The website's partner application (`<public origin>/apply`); null when no public origin is configured. */
     applyUrl: String? = null,
+    /** Where this install's partner application stands, when it holds a receipt for one; null hides the card. */
+    applicationStatus: ApplicationStatusService? = null,
+    /** Submits a partner application from the app (`applyWithReceipt`); null falls back to the website's form. */
+    applicationSubmit: PartnerApplicationService? = null,
 ) {
     LaunchedEffect(incomingToken) {
         val token = incomingToken ?: return@LaunchedEffect
@@ -88,6 +96,11 @@ fun PartnerSignInFlow(
         model.accept(token)
     }
     LaunchedEffect(model.phase) { if (model.phase is PartnerSignInPhase.SignedIn) onSignedIn() }
+    var applying by rememberSaveable { mutableStateOf(false) }
+    // While this install holds an application the server still shows, stop offering to apply again.
+    var holdsApplication by rememberSaveable { mutableStateOf(false) }
+    // Reloads the status card after a submission so the newly stored receipt is read at once.
+    var statusReload by rememberSaveable { mutableStateOf(0) }
     AuthColumn("partner-sign-in") {
         Text("Partner sign-in", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
         val phase = model.phase
@@ -97,7 +110,13 @@ fun PartnerSignInFlow(
                 sentTo != null && phase !is PartnerSignInPhase.SignedIn -> PartnerCheckEmail(model, sentTo)
                 phase is PartnerSignInPhase.Accepting || phase is PartnerSignInPhase.SignedIn ->
                     CircularProgressIndicator(modifier = Modifier.testTag("partner-signing-in"))
+                applying && applicationSubmit != null -> PartnerApplicationForm(
+                    service = applicationSubmit,
+                    onCancel = { applying = false },
+                    onSubmitted = { applying = false; statusReload++ },
+                )
                 else -> {
+                    if (applicationStatus != null) ApplicationStatusCard(applicationStatus, statusReload) { holdsApplication = it }
                     Text("We’ll email you a link to sign in to your organization’s portal.")
                     OutlinedTextField(
                         value = model.email, onValueChange = { model.email = it }, label = { Text("Work email") }, singleLine = true,
@@ -108,17 +127,115 @@ fun PartnerSignInFlow(
                     Button(onClick = model::submit, enabled = model.canSubmit, modifier = Modifier.fillMaxWidth().testTag("partner-sign-in-submit")) {
                         Text(if (phase is PartnerSignInPhase.Submitting) "Sending…" else "Email me a sign-in link")
                     }
+                    if (applicationSubmit != null && !holdsApplication) {
+                        OutlinedButton(onClick = { applying = true }, modifier = Modifier.fillMaxWidth().testTag("partner-apply-in-app")) {
+                            Text("New partner? Apply for your organization")
+                        }
+                    }
                     if (applyUrl != null) {
                         val context = LocalContext.current
                         TextButton(
                             onClick = { try { CustomTabsIntent.Builder().build().launchUrl(context, applyUrl.toUri()) } catch (_: ActivityNotFoundException) { } },
                             modifier = Modifier.fillMaxWidth().testTag("partner-apply"),
-                        ) { Text("New partner? Apply on the website") }
+                        ) { Text(if (applicationSubmit == null) "New partner? Apply on the website" else "Prefer the website? Apply there") }
                     }
                 }
             }
             OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth().testTag("partner-back")) { Text("Back") }
         }
+    }
+}
+
+/**
+ * The application form: the website's fields, submitted natively. After an unconfirmed attempt the form locks and
+ * the button becomes "Retry", which resends exactly what was sent. A `.contain` container keeps each field's own
+ * test tag (a bare container tag would flatten them).
+ */
+@Composable
+private fun PartnerApplicationForm(service: PartnerApplicationService, onCancel: () -> Unit, onSubmitted: () -> Unit) {
+    val model: PartnerApplicationModel = viewModel(key = "partner-application-form", factory = PartnerApplicationModel.factory(service))
+    LaunchedEffect(model.phase) { if (model.phase == ApplicationSubmitPhase.Submitted) onSubmitted() }
+    Column(
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxWidth().testTag("partner-application-form").semantics(mergeDescendants = false) {},
+    ) {
+        Text("Apply as a partner", style = MaterialTheme.typography.titleLarge, modifier = Modifier.dadHeading())
+        Text("Tell us about your organization. We’ll email you when it’s decided.", style = MaterialTheme.typography.bodyMedium)
+        ApplicationField("Organization", model.organization, { model.organization = it }, "partner-app-organization", model.isLocked)
+        PartnerTypePicker(model.type, model.isLocked) { model.type = it }
+        ApplicationField("Website", model.website, { model.website = it }, "partner-app-website", model.isLocked, KeyboardType.Uri)
+        ApplicationField("Approximate workforce size", model.workforce, { model.workforce = it }, "partner-app-workforce", model.isLocked, KeyboardType.Number)
+        ApplicationField("Your name", model.contactName, { model.contactName = it }, "partner-app-contact", model.isLocked)
+        ApplicationField("Your title", model.title, { model.title = it }, "partner-app-title", model.isLocked)
+        ApplicationField("Work email", model.workEmail, { model.workEmail = it }, "partner-app-email", model.isLocked, KeyboardType.Email)
+        ApplicationField("Phone", model.phone, { model.phone = it }, "partner-app-phone", model.isLocked, KeyboardType.Phone)
+        val phase = model.phase
+        if (phase is ApplicationSubmitPhase.Failed) ErrorLine(phase.message, "partner-app-error")
+        Button(onClick = model::submit, enabled = model.canSubmit, modifier = Modifier.fillMaxWidth().testTag("partner-app-submit")) {
+            Text(when {
+                phase is ApplicationSubmitPhase.Submitting -> "Sending…"
+                model.isLocked -> "Retry"
+                else -> "Submit application"
+            })
+        }
+        OutlinedButton(onClick = onCancel, enabled = phase != ApplicationSubmitPhase.Submitting,
+            modifier = Modifier.fillMaxWidth().testTag("partner-app-cancel")) { Text("Cancel") }
+    }
+}
+
+@Composable
+private fun ApplicationField(
+    label: String, value: String, onChange: (String) -> Unit, tag: String, locked: Boolean,
+    keyboard: KeyboardType = KeyboardType.Text,
+) {
+    OutlinedTextField(
+        value = value, onValueChange = onChange, label = { Text(label) }, singleLine = true, enabled = !locked,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboard),
+        modifier = Modifier.fillMaxWidth().testTag(tag),
+    )
+}
+
+@Composable
+private fun PartnerTypePicker(selected: PartnerOrganizationType, locked: Boolean, onSelect: (PartnerOrganizationType) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("Organization type", style = MaterialTheme.typography.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            PartnerOrganizationType.entries.forEach { option ->
+                FilterChip(
+                    selected = selected == option, onClick = { if (!locked) onSelect(option) }, enabled = !locked,
+                    label = { Text(option.label, maxLines = 1, softWrap = false) },
+                    modifier = Modifier.testTag("partner-app-type-${option.name.lowercase()}"),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The applicant's status, shown above partner sign-in only when the server recognizes this install's receipt.
+ * [reloadKey] bumps after a fresh submission so the newly stored receipt is read at once; [onHolds] tells the
+ * sign-in screen a status is showing, so it stops offering to apply again.
+ */
+@Composable
+private fun ApplicationStatusCard(service: ApplicationStatusService, reloadKey: Int = 0, onHolds: (Boolean) -> Unit = {}) {
+    val model: ApplicationStatusModel = viewModel(
+        key = "partner-application-status", factory = ApplicationStatusModel.factory(service))
+    LaunchedEffect(reloadKey) { if (reloadKey > 0) model.load() }
+    LaunchedEffect(model.phase) { onHolds(model.phase is ApplicationStatusPhase.Loaded) }
+    when (val phase = model.phase) {
+        is ApplicationStatusPhase.Loaded -> Column(
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+                .padding(16.dp).testTag("partner-application-status"),
+        ) {
+            Text(phase.info.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
+            Text(phase.info.message, modifier = Modifier.testTag("partner-application-message"))
+        }
+        is ApplicationStatusPhase.Failed -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ErrorLine(phase.message, "partner-application-error")
+            OutlinedButton(onClick = model::load, modifier = Modifier.testTag("partner-application-retry")) { Text("Try again") }
+        }
+        ApplicationStatusPhase.Loading, ApplicationStatusPhase.None -> Unit
     }
 }
 
@@ -177,9 +294,10 @@ fun PartnerPortal(model: PartnerModel, publicOrigin: String, onSignedOut: () -> 
             }
             snapshot == null -> CircularProgressIndicator(modifier = Modifier.testTag("partner-loading"))
             else -> {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                // Scrolls sideways so a long label ("Organization") or a large font keeps each tab on one line.
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                     PartnerSection.entries.forEach {
-                        FilterChip(selected = section == it, onClick = { section = it }, label = { Text(it.label) },
+                        FilterChip(selected = section == it, onClick = { section = it }, label = { Text(it.label, maxLines = 1, softWrap = false) },
                             modifier = Modifier.testTag("partner-tab-${it.name.lowercase()}"))
                     }
                 }

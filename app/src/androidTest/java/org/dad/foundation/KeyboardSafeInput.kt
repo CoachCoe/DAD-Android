@@ -34,6 +34,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 private const val SETTLE_TIMEOUT_MS = 20_000L
 private const val STABLE_FRAMES = 10
 
+// If the IME inset never becomes visible within this many frames, treat the platform as one that
+// cannot report it (see awaitKeyboardSettled) and stop waiting. ~180 frames is about 3s at 60fps.
+private const val NO_IME_GRACE_FRAMES = 180
+
 private fun resumedActivity(): Activity? {
     var found: Activity? = null
     InstrumentationRegistry.getInstrumentation().runOnMainSync {
@@ -53,12 +57,25 @@ fun ComposeTestRule.awaitKeyboardSettled() {
     val settled = AtomicBoolean(false)
     var last = -1
     var stable = 0
+    var sawIme = false
+    var frames = 0
     val onFrame = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
+            frames++
             val (visible, bottom) = imeBottomInset(activity)
+            if (visible && bottom > 0) sawIme = true
             if (visible && bottom > 0 && bottom == last) stable++ else stable = 0
             last = bottom
-            if (stable >= STABLE_FRAMES) settled.set(true) else Choreographer.getInstance().postFrameCallback(this)
+            // On a headless emulator (-no-window -gpu swiftshader_indirect) there is no real window
+            // surface, so the soft keyboard often never reports a positive IME inset to the decorView:
+            // `stable` would never reach STABLE_FRAMES and every typing test would block the full 20s.
+            // If the inset has not become visible even once within the grace window, give up waiting and
+            // fall back to waitForIdle(). This does NOT weaken the clip guard: when the inset never
+            // reports, bottom stays 0, so assertNotUnderKeyboard (which no-ops when the inset is not
+            // visible) is still correct and no tap is wrongly allowed under a keyboard. When the inset
+            // DOES report (a windowed emulator), we still wait for it to settle as before.
+            val settledNow = stable >= STABLE_FRAMES || (!sawIme && frames >= NO_IME_GRACE_FRAMES)
+            if (settledNow) settled.set(true) else Choreographer.getInstance().postFrameCallback(this)
         }
     }
     InstrumentationRegistry.getInstrumentation().runOnMainSync { Choreographer.getInstance().postFrameCallback(onFrame) }
@@ -93,13 +110,23 @@ fun ComposeTestRule.tapSafely(tag: String, timeoutMs: Long = 15_000) {
 
 /** Same safeguards for a node found some other way (e.g. by text). */
 fun ComposeTestRule.tapNode(node: SemanticsNodeInteraction, description: String) {
-    node.performScrollTo().assertIsDisplayed()
+    // App-shell chrome (the Scaffold TopAppBar back arrow / account avatar and the NavigationBar tabs)
+    // is deliberately NOT inside a scrollable container, so performScrollTo there throws "no parent
+    // layout with a Scroll SemanticsAction". Such chrome is always on screen, so a failed scroll there
+    // is harmless; attempt the scroll and swallow only that failure (same runCatching idiom as
+    // DashboardFlowTest). Reading ScrollBy off the semantics tree to pre-decide missed scrollable text
+    // fields, which skipped the scroll, left the field off-screen and unfocused, and timed out the IME
+    // wait in awaitKeyboardSettled. Still assert displayed + clear of the keyboard either way.
+    runCatching { node.performScrollTo() }
+    node.assertIsDisplayed()
     node.assertNotUnderKeyboard(description)
     node.performClick()
 }
 
 /** Types into [tag] (scrolled into view first), then waits for the keyboard to settle so the next tap is safe. */
-fun ComposeTestRule.enterText(tag: String, text: String, replace: Boolean = false, timeoutMs: Long = 15_000) {
+fun ComposeTestRule.enterText(
+    tag: String, text: String, replace: Boolean = false, timeoutMs: Long = 15_000, settleAfter: Boolean = true,
+) {
     waitUntil(timeoutMs) { exists(tag) }
     val field = onNodeWithTag(tag).performScrollTo()
     // A semantics-only insertion can request the IME before Android has served the editor.
@@ -107,5 +134,7 @@ fun ComposeTestRule.enterText(tag: String, text: String, replace: Boolean = fals
     tapNode(field, tag)
     awaitKeyboardSettled()
     if (replace) field.performTextReplacement(text) else field.performTextInput(text)
-    awaitKeyboardSettled()
+    // A field whose last character submits (the 6-digit sign-in code) dismisses the keyboard itself,
+    // so there is no settled keyboard to wait for afterwards.
+    if (settleAfter) awaitKeyboardSettled()
 }

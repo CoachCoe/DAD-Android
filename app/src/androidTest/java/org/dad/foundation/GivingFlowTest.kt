@@ -35,18 +35,19 @@ class GivingFlowTest {
             compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("gift-screen")).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("gift-screen").assertIsDisplayed()
             // Preview starts at the $1/day floor.
-            compose.waitUntil(10_000) { compose.onAllNodes(hasText("$1/day")).fetchSemanticsNodes().isNotEmpty() }
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText("$1 a day")).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("gift-daily").assertIsDisplayed()
-            compose.onNodeWithTag("gift-increase").performClick()
-            compose.waitUntil(5_000) { compose.onAllNodes(hasText("$2/day")).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("$2/day").assertIsDisplayed()
+            compose.onNodeWithTag("gift-chip-other").performScrollTo().performClick()
+            compose.onNodeWithTag("gift-increase").performScrollTo().performClick()
+            compose.waitUntil(5_000) { compose.onAllNodes(hasText("$2 a day")).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("$2 a day").assertIsDisplayed()
         }
     }
 
     @Test fun cancelConfirmationAppearsInline() {
         launch().use {
             compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("gift-cancel")).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("gift-cancel").performClick()
+            compose.onNodeWithTag("gift-cancel").performScrollTo().performClick()
             compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("cancel-confirm")).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("cancel-confirm").assertIsDisplayed()
             // The screen now carries the payment-method card above the cancel block, so scroll it into view.

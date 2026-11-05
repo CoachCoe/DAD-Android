@@ -4,6 +4,13 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -19,7 +26,6 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -84,7 +90,6 @@ private fun EventList(model: EventsModel, onClose: (() -> Unit)?, onOpen: (Strin
         modifier = Modifier.fillMaxHeight().wrapContentWidth(Alignment.Start).widthIn(max = 640.dp).fillMaxWidth().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp).testTag("events-home"),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        if (onClose != null) OutlinedButton(onClick = onClose, modifier = Modifier.heightIn(min = 48.dp).testTag("events-back")) { Text("Back") }
         Text("Events & volunteering", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
         when (val phase = model.phase) {
             is EventsPhase.Loading -> CircularProgressIndicator(modifier = Modifier.testTag("events-loading"))
@@ -104,19 +109,32 @@ private fun EventList(model: EventsModel, onClose: (() -> Unit)?, onOpen: (Strin
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EventRow(event: DonorEvent, now: Date, onOpen: (String) -> Unit) {
-    Column(modifier = Modifier.fillMaxWidth().testTag("event-${event.id}"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(event.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
-        Text(EventTime.start(event), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("event-start-${event.id}"))
-        Text(listOf(event.venue, event.city).filter { it.isNotBlank() }.joinToString(", ") + " · " + event.spotsLabel, style = MaterialTheme.typography.bodySmall)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            // State in text, not colour alone.
-            if (event.isInviteOnly) Text("Invite only", style = MaterialTheme.typography.labelLarge, modifier = Modifier.testTag("invite-only-${event.id}"))
-            statusLabel(event, now)?.let { Text(it, style = MaterialTheme.typography.labelLarge, modifier = Modifier.testTag("event-status-${event.id}")) }
-            if (event.earlyBooking && event.availability(now) is EventAvailability.Reservable && event.bookingOpensAt?.after(now) == true) {
-                Text("Early booking", style = MaterialTheme.typography.labelLarge, modifier = Modifier.testTag("early-booking-${event.id}"))
+    // Not clickable as a whole: a clickable row would merge the tagged texts away. The chevron button opens it.
+    Row(modifier = Modifier.fillMaxWidth().testTag("event-${event.id}"), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
+        val day = event.startsAt.toInstant().atZone(EventTime.zone(event.timeZone))
+        Column(
+            modifier = Modifier.clearAndSetSemantics {}.background(DadTheme.color("brand-wash"), MaterialTheme.shapes.small).padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(day.format(DateTimeFormatter.ofPattern("MMM", Locale.US)).uppercase(Locale.US), style = MaterialTheme.typography.labelSmall, color = DadTheme.color("ink"))
+            Text(day.dayOfMonth.toString(), style = MaterialTheme.typography.titleLarge, color = DadTheme.color("ink"))
+        }
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(event.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.dadHeading())
+            Text(EventTime.start(event), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("event-start-${event.id}"))
+            Text(listOf(event.venue, event.city).filter { it.isNotBlank() }.joinToString(", ") + " · " + event.spotsLabel, style = MaterialTheme.typography.bodySmall)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                // State in text, not colour alone.
+                if (event.isInviteOnly) Text("Invite only", style = MaterialTheme.typography.labelLarge, modifier = Modifier.testTag("invite-only-${event.id}"))
+                statusLabel(event, now)?.let { Text(it, style = MaterialTheme.typography.labelLarge, modifier = Modifier.testTag("event-status-${event.id}")) }
+                if (event.earlyBooking && event.availability(now) is EventAvailability.Reservable && event.bookingOpensAt?.after(now) == true) {
+                    Text("Early booking", style = MaterialTheme.typography.labelLarge, modifier = Modifier.testTag("early-booking-${event.id}"))
+                }
             }
         }
-        OutlinedButton(onClick = { onOpen(event.id) }, modifier = Modifier.heightIn(min = 48.dp).testTag("open-event-${event.id}")) { Text("View details") }
+        IconButton(onClick = { onOpen(event.id) }, modifier = Modifier.size(48.dp).testTag("open-event-${event.id}")) {
+            DadSymbol("chevron", "View details for ${event.title}")
+        }
     }
 }
 
@@ -135,11 +153,13 @@ private fun EventDetail(model: EventsModel, event: DonorEvent, onBack: () -> Uni
     val busy = event.id in model.busy
     var confirmingCancel by rememberSaveable(event.id) { mutableStateOf(false) }
     CalendarShare(model)
+    val haptics = rememberDadHaptics()
+    LaunchedEffect(model.lastOutcome) { if (model.lastOutcome != null) haptics.confirm() }
     Column(
         modifier = Modifier.fillMaxHeight().wrapContentWidth(Alignment.Start).widthIn(max = 640.dp).fillMaxWidth().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp).testTag("event-detail"),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        OutlinedButton(onClick = onBack, modifier = Modifier.heightIn(min = 48.dp).testTag("event-back")) { Text("All events") }
+        DadTextButton("All events", Modifier.testTag("event-back"), onClick = onBack)
         Text(event.title, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading().testTag("event-title"))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(event.typeLabel, style = MaterialTheme.typography.labelLarge, modifier = Modifier.testTag("event-type"))
@@ -188,10 +208,11 @@ private fun EventDetail(model: EventsModel, event: DonorEvent, onBack: () -> Uni
             if (confirmingCancel) {
                 Column(modifier = Modifier.testTag("cancel-confirm-${event.id}"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(if (event.status == ReservationStatus.WAITLISTED) "Leave the waitlist?" else "Give up your spot?", style = MaterialTheme.typography.bodyLarge)
-                    Button(onClick = { confirmingCancel = false; model.cancel(event.id) }, enabled = !busy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("cancel-confirm-go")) {
-                        Text(if (event.status == ReservationStatus.WAITLISTED) "Leave the waitlist" else "Give up my spot")
-                    }
-                    OutlinedButton(onClick = { confirmingCancel = false }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("cancel-keep")) { Text("Keep it") }
+                    DadDestructiveTextButton(
+                        if (event.status == ReservationStatus.WAITLISTED) "Leave the waitlist" else "Give up my spot",
+                        Modifier.fillMaxWidth().testTag("cancel-confirm-go"), enabled = !busy,
+                    ) { confirmingCancel = false; model.cancel(event.id) }
+                    DadSecondaryButton("Keep it", Modifier.fillMaxWidth().testTag("cancel-keep")) { confirmingCancel = false }
                 }
             } else {
                 OutlinedButton(onClick = { confirmingCancel = true }, enabled = !busy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("cancel-${event.id}")) {

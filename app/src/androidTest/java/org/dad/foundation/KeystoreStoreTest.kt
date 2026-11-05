@@ -34,4 +34,26 @@ class KeystoreStoreTest {
             assertFalse(file.exists())
         } finally { store.clear() }
     }
+
+    @Test fun donorPartnerAndApplicationReceiptAreSeparateEncryptedEntries() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val donor = KeystoreCredentialStore(context)
+        val partner = KeystoreCredentialStore(context, "partner-session", refreshable = false)
+        val receipt = KeystoreCredentialStore(context, "partner-application-receipt", refreshable = false)
+        try {
+            donor.save(Credentials("synthetic-donor-access", "synthetic-donor-refresh", 1))
+            partner.save(Credentials("synthetic-partner-access", "", 2))
+            receipt.save(Credentials("synthetic-receipt", "", 3))
+            for (name in listOf("donor-session", "partner-session", "partner-application-receipt")) {
+                assertTrue(name, File(context.noBackupFilesDir, "$name.enc").exists())
+            }
+            partner.clear()
+            // Ending one entry leaves the others signed in, and none reads another's value.
+            assertNull(partner.load())
+            assertEquals("synthetic-donor-access", donor.load()?.access)
+            assertEquals("synthetic-receipt", receipt.load()?.access)
+            receipt.clear()
+            assertEquals("synthetic-donor-access", donor.load()?.access)
+        } finally { donor.clear(); partner.clear(); receipt.clear() }
+    }
 }

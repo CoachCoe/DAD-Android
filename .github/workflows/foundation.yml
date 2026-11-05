@@ -1,5 +1,9 @@
 name: Mobile foundation checks
-on: [push, pull_request]
+# Push runs only on the integration branches; a PR branch is checked once, by its pull_request run.
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
 permissions:
   contents: read
 jobs:
@@ -21,7 +25,9 @@ jobs:
     # (no KVM, and the x86_64 system image will not run under HVF). Move this
     # to a self-hosted Linux host with KVM to go fully self-hosted.
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    # The emulator suite takes about 19 minutes on the hosted runner; leave headroom so a slow boot
+    # is not mistaken for a failure.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1

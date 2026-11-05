@@ -19,8 +19,8 @@ class AccountRecoveryTest {
         ActivityScenario.launch<MainActivity>(intent).use {
             compose.waitUntil(10_000) { compose.onAllNodes(hasText("Try again")).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Try again").performClick()
-            compose.waitUntil(10_000) { compose.onAllNodes(hasText("Welcome, Alex")).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("Welcome, Alex").assertIsDisplayed()
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText("Hi, Alex")).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Hi, Alex").assertIsDisplayed()
         }
     }
 }

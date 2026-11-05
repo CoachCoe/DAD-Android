@@ -115,6 +115,9 @@ class EventsWiredFlowTest {
             waitFor("open-event-${StubEvents.PARK}")
             assertTrue(!exists("open-event-${StubEvents.DINNER}"))
         }
+    }
+
+    @Test fun theInviteOnlyEventAppearsWhenTheServerReturnsIt() {
         launch("stub_events_invited").use {
             openEvents()
             waitFor("open-event-${StubEvents.DINNER}")
