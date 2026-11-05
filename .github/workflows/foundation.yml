@@ -8,7 +8,7 @@ permissions:
   contents: read
 jobs:
   contract:
-    runs-on: [self-hosted, dad, linux]
+    runs-on: [self-hosted, dad, macOS]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
