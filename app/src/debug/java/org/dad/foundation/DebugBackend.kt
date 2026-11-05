@@ -43,7 +43,19 @@ import okio.Buffer
 object DebugBackend {
     /** Every request path the stub transport has served since [resetRequestLog], for tests. */
     val requestLog: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf())
-    fun resetRequestLog() = requestLog.clear()
+
+    /** The invite link the app last asked [DebugReferralSharer] to copy, for tests (null = never copied). */
+    @Volatile var copiedLink: String? = null
+    /** The invite link / channel the app last asked [DebugReferralSharer] to share, for tests. */
+    @Volatile var sharedLink: String? = null
+    @Volatile var sharedChannel: String? = null
+
+    fun resetRequestLog() {
+        requestLog.clear()
+        copiedLink = null
+        sharedLink = null
+        sharedChannel = null
+    }
 
     const val ORIGIN = "https://stub.invalid"
     const val REFERRAL_TOKEN = "stub-referral-token-0000000000000000000000"
