@@ -36,6 +36,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -100,7 +101,7 @@ fun PartnerSignInFlow(
     // While this install holds an application the server still shows, stop offering to apply again.
     var holdsApplication by rememberSaveable { mutableStateOf(false) }
     // Reloads the status card after a submission so the newly stored receipt is read at once.
-    var statusReload by rememberSaveable { mutableStateOf(0) }
+    var statusReload by rememberSaveable { mutableIntStateOf(0) }
     AuthColumn("partner-sign-in") {
         Text("Partner sign-in", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.dadHeading())
         val phase = model.phase
