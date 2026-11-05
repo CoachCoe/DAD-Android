@@ -14,6 +14,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -132,7 +133,7 @@ private fun CheckEmail(email: String, notice: String?, onPastedLink: (String) ->
     // Static countdown: a saveable deadline (survives rotation) and a 1s tick that recomputes the
     // remaining whole seconds as plain text. Numbers are never animated.
     val deadline = rememberSaveable { System.currentTimeMillis() + RESEND_COOLDOWN_SECONDS * 1000L }
-    var remaining by rememberSaveable { mutableStateOf(RESEND_COOLDOWN_SECONDS) }
+    var remaining by rememberSaveable { mutableIntStateOf(RESEND_COOLDOWN_SECONDS) }
     LaunchedEffect(deadline) {
         while (remaining > 0) {
             remaining = (((deadline - System.currentTimeMillis()) + 999) / 1000).toInt().coerceAtLeast(0)
