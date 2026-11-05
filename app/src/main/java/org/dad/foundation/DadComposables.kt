@@ -90,15 +90,3 @@ fun DadSymbol(name: String, contentDescription: String, modifier: Modifier = Mod
         style = MaterialTheme.typography.titleMedium,
     )
 }
-
-/**
- * An empty-state hint: an explanatory line plus an action slot. Callers pass a [DadSecondaryButton] or
- * [DadTextButton] as the action, so the button weight stays the caller's choice.
- */
-@Composable
-fun DadEmptyHint(text: String, modifier: Modifier = Modifier, action: @Composable () -> Unit) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(text, style = MaterialTheme.typography.bodyMedium)
-        action()
-    }
-}
