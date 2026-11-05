@@ -9,3 +9,7 @@ object DebugBackend {
     @Suppress("UNUSED_PARAMETER")
     fun stub(context: Context, scope: CoroutineScope, options: LaunchOptions): AppServices? = null
 }
+
+/** Release builds always use the real clipboard/share-sheet sharer; there is no capturing double. */
+@Suppress("UNUSED_PARAMETER")
+fun debugReferralSharer(context: Context, publicOrigin: String): ReferralSharer = AndroidReferralSharer(context)

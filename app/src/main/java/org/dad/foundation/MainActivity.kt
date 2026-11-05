@@ -952,7 +952,7 @@ private fun DonorShellTab(
             EngagementHome(
                 viewModel(key = "engagement-${model.generation}", factory = EngagementModel.factory(engagementService)),
                 publicOrigin = publicOrigin,
-                sharer = remember { ReferralShareAction(AndroidReferralSharer(context), model.analytics) },
+                sharer = remember { ReferralShareAction(debugReferralSharer(context, publicOrigin), model.analytics) },
                 onSignedOut = { onSelectTab(DonorTab.HOME); model.onSignedOut() },
                 wallet = model.wallet?.let { viewModel<WalletPassModel>(key = "wallet-${model.generation}", factory = WalletPassModel.factory(it)) },
 
