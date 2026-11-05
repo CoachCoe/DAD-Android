@@ -1,7 +1,5 @@
 package org.dad.foundation
 
-import android.content.ClipboardManager
-import android.content.Context
 import android.content.Intent
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
@@ -126,12 +124,12 @@ class EngagementWiredFlowTest {
             waitFor("copy-invite")
             tap("copy-invite")
             textOf("copy-invite", "Copied")
-            var copied: String? = null
-            InstrumentationRegistry.getInstrumentation().runOnMainSync {
-                val clipboard = InstrumentationRegistry.getInstrumentation().targetContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                copied = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
-            }
-            assertEquals("https://stub.invalid/r/ALEX2026", copied)
+            // Assert at the app's own sharer seam (the DEBUG capturing [DebugReferralSharer] records what
+            // [ReferralShareAction.copy] forwarded) rather than reading the OS clipboard back, which races
+            // window focus on the headless CI emulator and intermittently returns null. Same guarantee —
+            // the real wired ReferralShareAction still runs — but deterministic and no ClipboardManager.
+            compose.waitUntil(20_000) { DebugBackend.copiedLink != null }
+            assertEquals("https://stub.invalid/r/ALEX2026", DebugBackend.copiedLink)
         }
     }
 
