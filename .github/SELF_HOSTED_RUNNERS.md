@@ -23,7 +23,7 @@ KVM** (nested virtualization enabled). Until such a host exists, keep this job o
 
 ## Registration
 
-`CoachCoe` is a GitHub user account, so the runner is registered per-repository.
+The runner is registered per-repository against the `pre-dad/DAD-Android` repo.
 The self-hosted host is an Apple Silicon Mac; `macOS`, `ARM64` and `self-hosted`
 are auto-added from what the host reports, so only the `dad` custom label is set
 at registration. (An earlier `linux` label was a misnomer for a macOS host and
@@ -31,7 +31,7 @@ has been removed — do not re-add it.) Register from
 **Settings → Actions → Runners → New self-hosted runner**:
 
 ```sh
-./config.sh --url https://github.com/CoachCoe/DAD-Android \
+./config.sh --url https://github.com/pre-dad/DAD-Android \
   --token <TOKEN_FROM_THE_RUNNERS_PAGE> \
   --labels dad --name dad-android-1
 ./svc.sh install && ./svc.sh start

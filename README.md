@@ -154,7 +154,7 @@ real-device FCM, Instruments/perf, store listing) remain a hands-on checklist.
 
 ## Dependency updates
 
-Download a specific `mobile-foundation-vX.Y.Z` release from `CoachCoe/DAD-Main`, review
+Download a specific `mobile-foundation-vX.Y.Z` release from `pre-dad/DAD-Main`, review
 its source revision and changes, and update the vendored snapshot and lock together.
 `node scripts/check-foundation.mjs` verifies the version, revision, manifest, and payload
 hashes offline. Never edit the generated snapshot or fetch latest/dev during builds.
