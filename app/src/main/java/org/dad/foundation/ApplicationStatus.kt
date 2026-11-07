@@ -10,7 +10,9 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.google.gson.JsonElement
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import retrofit2.Response
@@ -81,16 +83,13 @@ class WireApplicationStatus(
 ) : ApplicationStatusService {
     private val url: HttpUrl = validatedOrigin(origin)
 
-    /** Whether a receipt is kept, so the UI can skip the card entirely when there is nothing to show. */
-    val hasReceipt: Boolean get() = receipt.load() != null
-
     override suspend fun status(): ApplicationStatusInfo? {
-        val kept = receipt.load() ?: return null
+        val kept = withContext(Dispatchers.IO) { receipt.load() } ?: return null
         val response = decoding { nativeRetrofit(url, baseClient, kept.access).create(ApplicationReads::class.java).status() }
         if (response.code() == 401) {
             // Unknown or expired receipt: there is no application to show, and the receipt is useless.
             response.errorBody()?.close()
-            receipt.clear()
+            withContext(Dispatchers.IO) { receipt.clear() }
             return null
         }
         val body = decoding { response.successBody() }.asObjectOrInvalid()

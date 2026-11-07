@@ -29,7 +29,7 @@ class AccountModelTest {
         override suspend fun logout(access: String) = Unit
     }
     private fun model(api: Api = Api(), store: RecordingStore = RecordingStore()) =
-        AccountModel({ scope, _ -> AppServices(AccountSession(api, store, scope), UnconfiguredSignIn, null) }, dispatcher)
+        AccountModel({ scope, _ -> AppServices(AccountSession(api, store, scope, dispatcher), UnconfiguredSignIn, null) }, dispatcher)
 
     @Test fun aStoredSessionRestoresIntoTheDonorShell() = runTest {
         val m = model(store = RecordingStore(validCredentials()))
@@ -115,7 +115,7 @@ class AccountModelTest {
             override suspend fun claim(token: String): Credentials = throw AccountFailure.SignedOut
             override suspend fun logout(access: String) = Unit
         }
-        val m = AccountModel({ scope, _ -> AppServices(AccountSession(api, RecordingStore(), scope), UnconfiguredSignIn, null) }, dispatcher)
+        val m = AccountModel({ scope, _ -> AppServices(AccountSession(api, RecordingStore(), scope, dispatcher), UnconfiguredSignIn, null) }, dispatcher)
         m.start()
         m.load(claim = "a".repeat(32))
         assertFalse(m.hasSession)

@@ -1,7 +1,10 @@
 package org.dad.foundation
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -10,6 +13,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 sealed class AccountFailure : java.io.IOException() {
     data object SignedOut : AccountFailure()
@@ -51,7 +55,13 @@ interface CredentialStore {
     fun clear()
 }
 
-class AccountSession(private val api: AccountAPI, private val store: CredentialStore, scope: CoroutineScope) {
+/** Credential persistence is Keystore and file I/O, so it runs on [io] and is never cancelled halfway. */
+class AccountSession(
+    private val api: AccountAPI,
+    private val store: CredentialStore,
+    scope: CoroutineScope,
+    private val io: CoroutineDispatcher = Dispatchers.IO,
+) {
     private val refreshScope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]))
     private val mutex = Mutex()
     private var credentials = store.load()
@@ -73,7 +83,7 @@ class AccountSession(private val api: AccountAPI, private val store: CredentialS
         mutex.withLock {
             if (epoch != before) throw AccountFailure.SignedOut
             currentCoroutineContext().ensureActive()
-            store.save(result)
+            persist(result)
             credentials = result
             epoch++
             flight = null
@@ -152,7 +162,7 @@ class AccountSession(private val api: AccountAPI, private val store: CredentialS
                         val refreshed = api.refresh(current.refresh)
                         mutex.withLock {
                             if (epoch == startedAt) {
-                                try { store.save(refreshed) }
+                                try { persist(refreshed) }
                                 catch (failure: Exception) { clearLocal(); throw failure }
                                 credentials = refreshed
                             }
@@ -176,11 +186,13 @@ class AccountSession(private val api: AccountAPI, private val store: CredentialS
         }
     }
 
-    private fun clearLocal() {
+    private suspend fun persist(value: Credentials) = withContext(io + NonCancellable) { store.save(value) }
+
+    private suspend fun clearLocal() {
         epoch++
         credentials = null
         flight = null
-        store.clear()
+        withContext(io + NonCancellable) { store.clear() }
     }
 
     suspend fun logout() {
