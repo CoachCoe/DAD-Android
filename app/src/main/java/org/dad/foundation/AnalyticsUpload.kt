@@ -67,7 +67,7 @@ class AnalyticsUploader(
     private val flushing = Mutex()
     private var flushScheduled = false
     private var failures = 0
-    private var retryAtMillis = 0L
+    @Volatile private var retryAtMillis = 0L
 
     fun choose(allowed: Boolean) {
         consent.choice = allowed
