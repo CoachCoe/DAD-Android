@@ -474,8 +474,12 @@ class MainActivity : ComponentActivity() {
         val partner = BuildConfig.DEBUG && intent.getBooleanExtra("preview_partner", false)
         val partnerViewer = BuildConfig.DEBUG && intent.getBooleanExtra("preview_partner_viewer", false)
         val appContext = applicationContext
-        incomingLink = intent.dataString
-        incomingTap = PushTap.from(intent.getStringExtra("category"), intent.getStringExtra("path"))
+        // Only a fresh launch carries a link or notification tap: after a rotation the same intent would be replayed
+        // (re-counting `push_opened` and re-capturing the referral).
+        if (savedInstanceState == null) {
+            incomingLink = intent.dataString
+            incomingTap = PushTap.from(intent.getStringExtra("category"), intent.getStringExtra("path"))
+        }
         val factory = viewModelFactory {
             initializer {
                 AccountModel(factory = factory@{ scope, options ->
@@ -787,14 +791,14 @@ private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaun
                     NavigationBarItem(
                         selected = tab == DonorTab.HOME,
                         onClick = { tab = DonorTab.HOME },
-                        icon = { Text("\u2302") },
+                        icon = { Text("\u2302", modifier = Modifier.clearAndSetSemantics {}) },
                         label = { Text("Home") },
                         modifier = Modifier.testTag("tab-home"),
                     )
                     NavigationBarItem(
                         selected = tab == DonorTab.CIRCLE,
                         onClick = { tab = DonorTab.CIRCLE },
-                        icon = { Text("\u25CE") },
+                        icon = { Text("\u25CE", modifier = Modifier.clearAndSetSemantics {}) },
                         label = { Text("Circle") },
                         enabled = engagementService != null,
                         modifier = Modifier.testTag("tab-circle"),
@@ -802,7 +806,7 @@ private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaun
                     NavigationBarItem(
                         selected = tab == DonorTab.EVENTS,
                         onClick = { tab = DonorTab.EVENTS },
-                        icon = { Text("\u2605") },
+                        icon = { Text("\u2605", modifier = Modifier.clearAndSetSemantics {}) },
                         label = { Text("Events") },
                         enabled = eventsService != null,
                         modifier = Modifier.testTag("tab-events"),
@@ -810,7 +814,7 @@ private fun DonorShell(model: AccountModel, publicOrigin: String, openGiftAtLaun
                     NavigationBarItem(
                         selected = tab == DonorTab.GIVING,
                         onClick = { tab = DonorTab.GIVING },
-                        icon = { Text("\u2661") },
+                        icon = { Text("\u2661", modifier = Modifier.clearAndSetSemantics {}) },
                         label = { Text("Giving") },
                         enabled = giving != null,
                         modifier = Modifier.testTag("tab-giving"),

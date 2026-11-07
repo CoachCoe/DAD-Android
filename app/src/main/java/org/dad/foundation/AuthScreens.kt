@@ -246,7 +246,7 @@ private fun SignInMethods(
             }
         }
         Spacer(Modifier.height(12.dp))
-        Button(onClick = onBack) { Text("Back") }
+        DadTextButton("Back", onClick = onBack)
     }
 }
 

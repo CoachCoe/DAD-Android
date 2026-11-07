@@ -58,8 +58,10 @@ class AnalyticsUploadTest {
         }
     }
 
+    private var clock = 0L
+
     private fun uploader(scope: TestScope, consent: AnalyticsConsent, sink: Sink) =
-        AnalyticsUploader(consent, sink, scope, now = { Instant.parse("2026-11-01T10:00:00Z") })
+        AnalyticsUploader(consent, sink, scope, now = { Instant.parse("2026-11-01T10:00:00Z") }, elapsedMillis = { clock })
 
     @Test fun nothingIsRecordedUntilTheDonorAllowsIt() = runTest(StandardTestDispatcher()) {
         val sink = Sink()
@@ -89,7 +91,11 @@ class AnalyticsUploadTest {
         sink.failure = null
         analytics.emit(AnalyticsEvent.IrlCodeShown)
         advanceUntilIdle()
-        assertEquals(listOf("app_opened", "irl_code_shown"), sink.batches.single().map { it.name })
+        assertEquals("an event inside the backoff window does not retry", 0, sink.batches.size)
+        clock += AnalyticsUploader.backoffMillis(1)
+        analytics.emit(AnalyticsEvent.IrlCodeShown)
+        advanceUntilIdle()
+        assertEquals(listOf("app_opened", "irl_code_shown", "irl_code_shown"), sink.batches.single().map { it.name })
         assertEquals(0, analytics.pending)
 
         sink.failure = AccountFailure.Unavailable
@@ -99,6 +105,17 @@ class AnalyticsUploadTest {
         assertEquals(0, analytics.pending)
         analytics.emit(AnalyticsEvent.IrlCodeShown)
         assertEquals(0, analytics.pending)
+    }
+
+    @Test fun aBurstOfEventsIsOneUploadAndRepeatedFailuresBackOffExponentially() = runTest(StandardTestDispatcher()) {
+        val sink = Sink()
+        val analytics = uploader(this, MemoryAnalyticsConsent(true), sink)
+        repeat(20) { analytics.emit(AnalyticsEvent.IrlCodeShown) }
+        advanceUntilIdle()
+        assertEquals(listOf(20), sink.batches.map { it.size })
+        assertEquals(30_000L, AnalyticsUploader.backoffMillis(1))
+        assertEquals(60_000L, AnalyticsUploader.backoffMillis(2))
+        assertEquals(900_000L, AnalyticsUploader.backoffMillis(40))
     }
 
     @Test fun aRejectedBatchIsDroppedNotRetried() = runTest(StandardTestDispatcher()) {

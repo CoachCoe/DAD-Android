@@ -4,6 +4,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
@@ -33,7 +34,7 @@ class FoundationTest {
     @Test fun concurrentExpiryUsesOneRefreshAndOnePersistence() = runTest {
         val api = ControlledAPI()
         val store = MemoryStore(Credentials("old", "refresh", 0))
-        val session = AccountSession(api, store, backgroundScope)
+        val session = AccountSession(api, store, backgroundScope, UnconfinedTestDispatcher(testScheduler))
         val requests = List(20) { async { session.profile() } }
         api.started.await()
         api.answer.complete(Credentials("new", "new-refresh", Long.MAX_VALUE))
@@ -44,7 +45,7 @@ class FoundationTest {
     }
     @Test fun unauthorizedReadRefreshesOnce() = runTest {
         val api = ControlledAPI()
-        val session = AccountSession(api, MemoryStore(Credentials("old", "refresh", Long.MAX_VALUE)), backgroundScope)
+        val session = AccountSession(api, MemoryStore(Credentials("old", "refresh", Long.MAX_VALUE)), backgroundScope, UnconfinedTestDispatcher(testScheduler))
         val request = async { session.profile() }
         api.started.await()
         api.answer.complete(Credentials("new", "new-refresh", Long.MAX_VALUE))
@@ -54,7 +55,7 @@ class FoundationTest {
     @Test fun logoutDuringRefreshCannotRestoreCredentialsAndRevokesNewToken() = runTest {
         val api = ControlledAPI()
         val store = MemoryStore(Credentials("old", "refresh", 0))
-        val session = AccountSession(api, store, backgroundScope)
+        val session = AccountSession(api, store, backgroundScope, UnconfinedTestDispatcher(testScheduler))
         val request = async { runCatching { session.profile() } }
         api.started.await()
         val logout = async { session.logout() }
@@ -69,7 +70,7 @@ class FoundationTest {
     @Test fun cancelledReaderDoesNotCancelSharedRefresh() = runTest {
         val api = ControlledAPI()
         val store = MemoryStore(Credentials("old", "refresh", 0))
-        val session = AccountSession(api, store, backgroundScope)
+        val session = AccountSession(api, store, backgroundScope, UnconfinedTestDispatcher(testScheduler))
         val first = async { session.profile() }
         api.started.await()
         val second = async { session.profile() }
@@ -82,7 +83,7 @@ class FoundationTest {
     @Test fun revokedRefreshClearsStorage() = runTest {
         val api = ControlledAPI()
         val store = MemoryStore(Credentials("old", "refresh", 0))
-        val session = AccountSession(api, store, backgroundScope)
+        val session = AccountSession(api, store, backgroundScope, UnconfinedTestDispatcher(testScheduler))
         val request = async { runCatching { session.profile() } }
         api.started.await()
         api.answer.completeExceptionally(AccountFailure.SignedOut)
@@ -92,7 +93,7 @@ class FoundationTest {
     @Test fun newClaimCannotBeOverwrittenByEarlierRefresh() = runTest {
         val api = ControlledAPI()
         val store = MemoryStore(Credentials("old", "refresh", 0))
-        val session = AccountSession(api, store, backgroundScope)
+        val session = AccountSession(api, store, backgroundScope, UnconfinedTestDispatcher(testScheduler))
         val old = async { runCatching { session.profile() } }
         api.started.await()
         session.claim("synthetic-proof")

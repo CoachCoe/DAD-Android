@@ -27,8 +27,9 @@ android {
         applicationId = "org.dad.foundation"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        // Release builds pass -PdadVersionCode (strictly increasing; CI uses the run number) and -PdadVersionName.
+        versionCode = providers.gradleProperty("dadVersionCode").orNull?.toInt() ?: 1
+        versionName = providers.gradleProperty("dadVersionName").orElse("1.0.0").get()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         val apiOrigin = providers.gradleProperty("dadApiOrigin").orElse("").get()
         buildConfigField("String", "DAD_API_ORIGIN", groovy.json.JsonOutput.toJson(apiOrigin))

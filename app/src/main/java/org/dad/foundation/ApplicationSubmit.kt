@@ -10,7 +10,10 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.google.gson.JsonElement
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
@@ -108,12 +111,12 @@ class WirePartnerApplication(
     override suspend fun submit(attempt: PartnerApplicationAttempt) {
         // Keep the receipt before the request leaves: the server never echoes it, so a crash after send must still
         // be able to read the status. Its 30-day server lifetime is mirrored as the stored expiry.
-        receipt.save(Credentials(attempt.receipt, refresh = "", expiresAtMillis = now() + RECEIPT_LIFETIME_MILLIS))
+        withContext(Dispatchers.IO) { receipt.save(Credentials(attempt.receipt, refresh = "", expiresAtMillis = now() + RECEIPT_LIFETIME_MILLIS)) }
         try {
             send(attempt)
         } catch (failure: ApplicationSubmitFailure) {
             when (failure) {
-                is ApplicationSubmitFailure.Invalid, ApplicationSubmitFailure.Conflict, ApplicationSubmitFailure.Forbidden -> receipt.clear()
+                is ApplicationSubmitFailure.Invalid, ApplicationSubmitFailure.Conflict, ApplicationSubmitFailure.Forbidden -> withContext(NonCancellable + Dispatchers.IO) { receipt.clear() }
                 is ApplicationSubmitFailure.RateLimited, ApplicationSubmitFailure.Unconfirmed -> Unit
             }
             throw failure

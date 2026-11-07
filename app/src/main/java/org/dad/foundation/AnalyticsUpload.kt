@@ -8,7 +8,9 @@ import androidx.core.content.edit
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -56,12 +58,16 @@ class AnalyticsUploader(
     private val sink: AnalyticsSink,
     private val scope: CoroutineScope,
     private val now: () -> Instant = Instant::now,
+    private val elapsedMillis: () -> Long = { System.nanoTime() / 1_000_000 },
 ) : AnalyticsEmitter {
     var choice by mutableStateOf(consent.choice)
         private set
     private val journey = UUID.randomUUID().toString()
     private val buffer = ArrayDeque<AnalyticsRecord>()
     private val flushing = Mutex()
+    private var flushScheduled = false
+    private var failures = 0
+    @Volatile private var retryAtMillis = 0L
 
     fun choose(allowed: Boolean) {
         consent.choice = allowed
@@ -75,7 +81,20 @@ class AnalyticsUploader(
             buffer.addLast(AnalyticsRecord(UUID.randomUUID().toString(), journey, event.name, now(), event.properties))
             while (buffer.size > LIMIT) buffer.removeFirst()
         }
-        scope.launch { flush() }
+        scheduleFlush()
+    }
+
+    /** Coalesces a burst of events into one upload, and stays quiet while backing off from a failed one. */
+    private fun scheduleFlush() {
+        synchronized(buffer) {
+            if (flushScheduled) return
+            flushScheduled = true
+        }
+        scope.launch {
+            delay(COALESCE_MILLIS)
+            synchronized(buffer) { flushScheduled = false }
+            if (elapsedMillis() >= retryAtMillis) flush()
+        }
     }
 
     suspend fun flush() = flushing.withLock {
@@ -86,9 +105,14 @@ class AnalyticsUploader(
                 sink.send(batch)
             } catch (_: AccountFailure.InvalidInput) {
                 // The server rejects the whole batch for one bad event, so resending it would fail forever.
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (_: Exception) {
+                failures++
+                retryAtMillis = elapsedMillis() + backoffMillis(failures)
                 return@withLock
             }
+            failures = 0
             synchronized(buffer) { buffer.removeAll { sent -> batch.any { it.id == sent.id } } }
         }
     }
@@ -97,6 +121,13 @@ class AnalyticsUploader(
 
     companion object {
         const val BATCH = 100
+        private const val COALESCE_MILLIS = 5_000L
+        private const val BACKOFF_BASE_MILLIS = 30_000L
+        private const val BACKOFF_MAX_MILLIS = 900_000L
+
+        /** Exponential retry gap after [failures] consecutive failed uploads, so an outage never becomes a request per event. */
+        internal fun backoffMillis(failures: Int): Long =
+            (BACKOFF_BASE_MILLIS shl (failures - 1).coerceIn(0, 10)).coerceAtMost(BACKOFF_MAX_MILLIS)
         private const val LIMIT = 500
     }
 }

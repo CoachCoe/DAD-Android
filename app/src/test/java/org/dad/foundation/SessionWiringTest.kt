@@ -4,6 +4,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
@@ -24,6 +25,27 @@ class SessionWiringTest {
         override suspend fun refresh(token: String): Credentials { refreshes++; return Credentials("r-$refreshes", "rr-$refreshes", Long.MAX_VALUE) }
         override suspend fun claim(token: String) = Credentials("claimed", "claimed-refresh", Long.MAX_VALUE)
         override suspend fun logout(access: String) { loggedOut += access }
+    }
+
+    private class ThreadRecordingStore : CredentialStore {
+        var value: Credentials? = null
+        val threads = mutableListOf<String>()
+        override fun load() = value
+        override fun save(value: Credentials) { this.value = value; threads += Thread.currentThread().name }
+        override fun clear() { value = null; threads += Thread.currentThread().name }
+    }
+
+    @Test fun credentialsArePersistedOnTheStorageDispatcherNotTheCaller() = runTest {
+        val store = ThreadRecordingStore()
+        val storage = java.util.concurrent.Executors.newSingleThreadExecutor { Thread(it, "storage-thread") }
+        try {
+            val session = AccountSession(Api(), store, backgroundScope, storage.asCoroutineDispatcher())
+            session.establish { Credentials("in", "in-refresh", Long.MAX_VALUE) }
+            session.discardLocal()
+            assertEquals(listOf("storage-thread", "storage-thread"), store.threads)
+        } finally {
+            storage.shutdown()
+        }
     }
 
     @Test fun establishInstallsTheCredentialsTheSessionAwaited() = runTest {

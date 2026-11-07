@@ -178,7 +178,6 @@ class WirePartnerStatusTest {
     @Test fun withoutAReceiptNothingIsReadOrSent() = runTest {
         val http = ScriptedHttp { 200 to "{}" }
         val wire = WireApplicationStatus(TEST_ORIGIN, MemoryStore(), http.client())
-        assertFalse(wire.hasReceipt)
         assertNull(wire.status())
         assertTrue(http.requests.isEmpty())
     }

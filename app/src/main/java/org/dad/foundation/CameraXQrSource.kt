@@ -88,9 +88,9 @@ object CameraXQrSource : QrScannerSource {
                         }
                         val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
                         bound.unbindAll()
-                        val bound1 = bound.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
-                        camera = bound1
-                        currentOnStatus(ScannerStatus.Ready(hasTorch = bound1.cameraInfo.hasFlashUnit()))
+                        val active = bound.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+                        camera = active
+                        currentOnStatus(ScannerStatus.Ready(hasTorch = active.cameraInfo.hasFlashUnit()))
                     } catch (_: Exception) {
                         currentOnStatus(ScannerStatus.Unavailable)
                     }

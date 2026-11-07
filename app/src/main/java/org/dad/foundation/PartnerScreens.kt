@@ -465,8 +465,8 @@ private fun PartnerCompanyCode(code: String, publicOrigin: String) {
         val link = publicOrigin.trimEnd('/') + "/c/" + code
         val qr = remember(link) { runCatching { qrBitmap(link) }.getOrNull() }
         if (qr != null) {
-            Image(qr.asImageBitmap(), contentDescription = null, filterQuality = FilterQuality.None,
-                modifier = Modifier.size(160.dp).testTag("partner-company-qr").semantics { contentDescription = "QR code for $link" })
+            Image(qr.asImageBitmap(), contentDescription = "QR code for $link", filterQuality = FilterQuality.None,
+                modifier = Modifier.size(160.dp).testTag("partner-company-qr"))
         }
         OutlinedButton(
             onClick = {
