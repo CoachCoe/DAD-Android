@@ -145,10 +145,12 @@ backed up safely — losing them after publishing requires a Play key reset:
 keytool -genkeypair -v -keystore upload-keystore.jks \
   -keyalg RSA -keysize 2048 -validity 10000 -alias dad-upload
 cp keystore.properties.example keystore.properties   # then fill in the values
-./gradlew :app:bundleRelease                          # signed AAB for Play
+./gradlew :app:bundleRelease -PdadVersionCode=2 -PdadVersionName=1.0.1   # signed AAB for Play
 ```
 
-Bump `versionCode`/`versionName` in `app/build.gradle.kts` for each Play release.
+`versionName` defaults to `1.0.0` and `versionCode` to `1`; pass a strictly increasing `-PdadVersionCode`
+(and the marketing `-PdadVersionName`) for every Play upload. The release label is `DAD`; debug builds are
+labelled `DAD Preview` and install beside it.
 Device-gated pre-submission items (verified App Links against `assetlinks.json`,
 real-device FCM, Instruments/perf, store listing) remain a hands-on checklist.
 
@@ -250,7 +252,7 @@ partner session; links whose token starts `goodpartner` are accepted).
 
 ## Analytics and push (contract 2.9.0)
 
-**Analytics are opt-in**, worded and counted as on the website. The start screen asks once ("Allow usage
+**Analytics are opt-in**, worded and counted as on the website. The app asks once, after the first sign-in ("Allow usage
 analytics?") and Settings has a "Usage analytics" switch; until the donor allows it nothing is recorded. Events go
 only to DAD-Main's `ingestAnalytics` (first party, `X-DAD-Platform: ANDROID`, attributed to the donor when signed
 in) in batches of up to 100 with a stable id each, so a retried batch is not double-counted; declining drops

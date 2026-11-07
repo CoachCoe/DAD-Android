@@ -93,7 +93,7 @@ internal fun SignupFlow(model: SignupModel, onPastedLink: (String) -> Boolean, n
         if (busy) { Spacer(Modifier.height(12.dp)); CircularProgressIndicator(modifier = Modifier.testTag("signup-working")) }
         (model.phase as? SignupPhase.Failed)?.let { FieldError(it.message, "signup-error") }
         Spacer(Modifier.height(12.dp))
-        Button(onClick = onBack, modifier = Modifier.testTag("signup-back")) { Text("Back") }
+        DadTextButton("Back", Modifier.testTag("signup-back"), onClick = onBack)
     }
 }
 
@@ -120,7 +120,7 @@ internal fun EmailLinkFlow(model: SignInLinkModel, onPastedLink: (String) -> Boo
         if (busy) { Spacer(Modifier.height(12.dp)); CircularProgressIndicator(modifier = Modifier.testTag("email-link-working")) }
         (model.phase as? SignInLinkPhase.Failed)?.let { FieldError(it.message, "email-link-error") }
         Spacer(Modifier.height(12.dp))
-        Button(onClick = onBack, modifier = Modifier.testTag("email-link-back")) { Text("Back") }
+        DadTextButton("Back", Modifier.testTag("email-link-back"), onClick = onBack)
     }
 }
 
@@ -193,7 +193,7 @@ internal fun PasswordSignInFlow(model: PasswordSignInModel, onSignedIn: () -> Un
         if (busy) { Spacer(Modifier.height(12.dp)); CircularProgressIndicator(modifier = Modifier.testTag("password-working")) }
         (model.phase as? PasswordSignInPhase.Failed)?.let { FieldError(it.message, "password-error") }
         Spacer(Modifier.height(12.dp))
-        Button(onClick = onBack, modifier = Modifier.testTag("password-back")) { Text("Back") }
+        DadTextButton("Back", Modifier.testTag("password-back"), onClick = onBack)
     }
 }
 

@@ -33,6 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -128,7 +129,8 @@ private fun ScannerPanel(environment: ScannerEnvironment, onToken: (String) -> U
             Text(ScanCopy.PROMPT, style = MaterialTheme.typography.bodyMedium)
             typeInstead()
             Box(
-                Modifier.fillMaxWidth().widthIn(max = 420.dp).aspectRatio(1f).clip(RoundedCornerShape(16.dp)).testTag("scanner-viewfinder"),
+                Modifier.fillMaxWidth().widthIn(max = 420.dp).aspectRatio(1f).clip(RoundedCornerShape(16.dp)).testTag("scanner-viewfinder")
+                    .semantics { contentDescription = "Camera view for scanning the event QR code" },
                 contentAlignment = Alignment.Center,
             ) {
                 environment.source.Viewfinder(

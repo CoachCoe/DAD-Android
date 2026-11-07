@@ -1,9 +1,8 @@
 package org.dad.foundation
 
-// Client error tracking (PRD §10 observability, Phase 9). A single seam the screens report
-// through, so a failure on any screen can reach a crash/error backend without the UI coupling to
-// a specific SDK. The default is a no-op (nothing is sent until a reporter is installed at
-// release); the recorder de-dups so one failing load does not spam the backend. Pure + testable.
+// Client error tracking (PRD §10 observability). A seam for a crash/error backend (owner decision: Crashlytics,
+// Sentry, ...) so no screen couples to an SDK. Nothing calls it yet and the default is a no-op, so the app sends
+// no error reports. The recorder de-dups so one failing load does not spam the backend. Pure + testable.
 
 /** One reported client error. [screen] and [operation] locate it; [kind] is a coarse bucket. */
 data class ClientError(
