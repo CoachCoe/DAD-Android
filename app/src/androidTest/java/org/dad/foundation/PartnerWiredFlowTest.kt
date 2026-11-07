@@ -39,19 +39,18 @@ class PartnerWiredFlowTest {
     // surfacing as "No compose hierarchies found" or a ComposeTimeout on the first interaction. Rather than guard
     // each symptom, every test launches through this single readiness gate: it waits for the activity to actually
     // reach RESUMED and for compose to report a non-empty tree ONCE before any interaction runs.
+    private fun appResumed(): Boolean {
+        var resumed = false
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            resumed = ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).isNotEmpty()
+        }
+        return resumed
+    }
+
     private fun launchReady(vararg extras: String): ActivityScenario<MainActivity> {
         val scenario = launch(*extras)
         // 1. The launched activity must be RESUMED — same mechanism KeyboardSafeInput.resumedActivity() uses.
-        compose.waitUntil(30_000) {
-            runCatching {
-                var resumed = false
-                InstrumentationRegistry.getInstrumentation().runOnMainSync {
-                    resumed = ActivityLifecycleMonitorRegistry.getInstance()
-                        .getActivitiesInStage(Stage.RESUMED).isNotEmpty()
-                }
-                resumed
-            }.getOrDefault(false)
-        }
+        compose.waitUntil(30_000) { runCatching { appResumed() }.getOrDefault(false) }
         // 2. Compose must report a non-empty tree. Anchor on the always-present signed-out root tag `role-select`;
         //    for launches seeded straight into a signed-in/partner state that tag never appears, so fall back to any
         //    non-empty root. A pre-attach probe throws, which counts as "not ready" rather than aborting the wait.
@@ -146,8 +145,12 @@ class PartnerWiredFlowTest {
             openOrganization()
             compose.tapSafely("partner-export")
             compose.waitUntil(15_000) { "GET /donor/partner/report.pdf" in DebugBackend.requestLog }
-            // The chooser takes over the screen; put the app back in front before the scenario closes.
+            // The chooser opens asynchronously after the download. Dismissing it before it is up leaves it to appear
+            // over the NEXT test's activity, which then never reaches its first screen; so wait until the chooser has
+            // actually paused the app, dismiss it, and wait for the app to be back in front before the scenario closes.
+            compose.waitUntil(15_000) { !appResumed() }
             InstrumentationRegistry.getInstrumentation().uiAutomation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+            compose.waitUntil(15_000) { appResumed() }
         }
         assertTrue(DebugBackend.requestLog.count { it == "GET /donor/partner/exports" } >= 2)
     }
